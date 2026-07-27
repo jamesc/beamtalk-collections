@@ -1,8 +1,0 @@
-// Copyright 2026 collections authors
-// SPDX-License-Identifier: Apache-2.0
-
-/// Collections — main class for the collections library.
-Object subclass: Collections
-
-  /// Return a greeting string.
-  class greet => "Hello from collections!"
