@@ -1,0 +1,7 @@
+// Copyright 2026 collections authors
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: CollectionsTest
+
+  testBasic =>
+    self assert: (Collections greet) equals: "Hello from collections!"
