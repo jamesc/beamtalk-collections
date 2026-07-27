@@ -14,12 +14,62 @@ This repo is a standalone first-party package, following the same extraction sha
 [`beamtalk-http`](https://github.com/jamesc/beamtalk-http) per ADR 0073 (package distribution and
 discovery). It dogfoods the package system introduced by ADR 0070 (namespaces) and ADR 0073 (registry).
 
-## Status
+## Structures
 
-This repo currently holds only scaffolding — CI, docs, and project layout. No data structures have
-landed yet; `src/` and `test/` are intentionally empty. The first structure
-(`collections@Deque`, a banker's deque) lands in [BT-3011](https://linear.app/beamtalk/issue/BT-3011),
-along with the library's first `beamtalk publish` and its registry entry.
+### `PriorityQueue` — immutable pairing heap ([BT-3013](https://linear.app/beamtalk/issue/BT-3013))
+
+A persistent priority queue. `add:` and `merge:` are O(1) (they link two trees and stop), `removeMin`
+is O(log n) amortised, and `size` is O(1) because the count is carried in the queue's state. Every
+operation returns a new queue — the receiver is never modified.
+
+```beamtalk
+q := collections@PriorityQueue withAll: #(5, 1, 3).
+q peek                    // => 1
+q size                    // => 3
+q asSortedList            // => #(1, 3, 5)
+
+popped := q removeMin.    // {element, queue} Tuple, same shape as Queue>>dequeue
+popped at: 1              // => 1
+(popped at: 2) size       // => 2
+```
+
+**Ordering.** A two-argument comparator block returning a Boolean, the same convention as `List>>sort:`
+— it answers "should `a` come out before `b`?". The default is `[:a :b | a <= b]`, a min-heap.
+
+```beamtalk
+maxHeap := collections@PriorityQueue sortedBy: [:a :b | a >= b].
+(maxHeap addAll: #(5, 1, 9)) peek     // => 9
+```
+
+**`merge:` and comparator identity.** Merging two queues that order elements differently would produce a
+heap whose `peek` is not the minimum, so `merge:` refuses it. Each queue carries an *ordering token*
+(readable via `ordering`) that `merge:` compares with `=:=`: `new` uses `#natural`, `sortedBy:` uses the
+comparator block itself, and `sortedBy:labelled:` uses a label you supply. Blocks compare by identity, so
+two separately written literals never match even when they read the same — use `sortedBy:labelled:` to
+declare independently built comparators equivalent.
+
+```beamtalk
+a := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
+b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
+((a add: 1) merge: (b add: 9)) peek   // => 9
+
+// different tokens — raises
+(collections@PriorityQueue new) merge: (collections@PriorityQueue sortedBy: [:x :y | x >= y])
+```
+
+**Iteration is unordered.** `do:` — and everything built on it (`collect:`, `select:`, `asList`,
+`includes:`, …) — walks the heap, not a sorted sequence. Only the minimum is guaranteed to come first.
+Use `asSortedList` (O(n log n), a repeated `removeMin` drain) when you want ordered output.
+
+**Empty queues.** `peek` and `removeMin` raise on an empty queue; `peekIfEmpty:` and `removeMinIfEmpty:`
+take a block and return its value instead.
+
+**No decrease-key.** There is deliberately no `decreaseKey:`, and no efficient one is possible in a
+persistent structure: there are no stable node handles to decrease, and finding an element costs O(n).
+For Dijkstra or A*, use the standard workaround — push a *duplicate* entry at the lower priority and
+discard stale entries as you pop them.
+
+Duplicate elements are fully supported: a `PriorityQueue` is a heap, not a set.
 
 ## Usage
 

@@ -1,0 +1,282 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for PriorityQueue — an immutable pairing heap.
+
+TestCase subclass: PriorityQueueTest
+
+  // === Construction and basic queries ===
+  testNewIsEmpty =>
+    q := PriorityQueue new
+    self assert: q isEmpty equals: true
+    self assert: q size equals: 0
+    self assert: q asSortedList equals: #()
+
+  testWithAllBuildsQueue =>
+    q := PriorityQueue withAll: #(5, 1, 3)
+    self assert: q size equals: 3
+    self assert: q isEmpty equals: false
+    self assert: q peek equals: 1
+
+  testWithAllOnEmptyList =>
+    q := PriorityQueue withAll: #()
+    self assert: q isEmpty equals: true
+    self assert: q size equals: 0
+
+  testPrintString =>
+    self assert: PriorityQueue new printString equals: "PriorityQueue(0)"
+    self assert: (PriorityQueue withAll: #(1, 2)) printString equals: "PriorityQueue(2)"
+
+  // === Immutability ===
+  testAddDoesNotMutateReceiver =>
+    original := PriorityQueue withAll: #(5, 3)
+    extended := original add: 1
+    self assert: original size equals: 2
+    self assert: original peek equals: 3
+    self assert: extended size equals: 3
+    self assert: extended peek equals: 1
+
+  testRemoveMinDoesNotMutateReceiver =>
+    original := PriorityQueue withAll: #(5, 3, 1)
+    popped := original removeMin
+    self assert: original size equals: 3
+    self assert: original peek equals: 1
+    self assert: (popped at: 2) size equals: 2
+
+  // === Adding ===
+  testAddAll =>
+    q := PriorityQueue new addAll: #(9, 2, 7, 4)
+    self assert: q size equals: 4
+    self assert: q asSortedList equals: #(2, 4, 7, 9)
+
+  testAddAllOnNonEmptyQueue =>
+    q := (PriorityQueue withAll: #(6)) addAll: #(8, 2)
+    self assert: q size equals: 3
+    self assert: q asSortedList equals: #(2, 6, 8)
+
+  // === Sorting: the headline invariant ===
+  testDrainOfShuffledInputIsFullySorted =>
+    shuffled := #(17, 3, 42, 8, 25, 1, 99, 12, 6, 33, 20, 5, 71, 14, 2, 58, 9, 30, 11, 4)
+    q := PriorityQueue withAll: shuffled
+    self assert: q size equals: 20
+    self assert: q asSortedList equals: shuffled sort
+
+  testLargeDrainIsFullySorted =>
+    // Big enough to exercise repeated two-pass `mergePairs` over long child
+    // lists, which is where a pairing heap most easily goes wrong.
+    scrambled := (1 to: 300) asList collect: [:i | (i * 137) % 301]
+    q := PriorityQueue withAll: scrambled
+    self assert: q size equals: 300
+    self assert: q asSortedList equals: scrambled sort
+
+  testDrainStepByStepIsMonotonic =>
+    q := PriorityQueue withAll: #(7, 2, 9, 1, 5)
+    first := q removeMin
+    second := (first at: 2) removeMin
+    third := (second at: 2) removeMin
+    self assert: (first at: 1) equals: 1
+    self assert: (second at: 1) equals: 2
+    self assert: (third at: 1) equals: 5
+    self assert: (third at: 2) size equals: 2
+    self assert: (third at: 2) asSortedList equals: #(7, 9)
+
+  // === Duplicates ===
+  testDuplicatesAreAllRetained =>
+    q := PriorityQueue withAll: #(4, 1, 4, 1, 4)
+    self assert: q size equals: 5
+    self assert: q asSortedList equals: #(1, 1, 4, 4, 4)
+
+  testDuplicatesPopIndividually =>
+    q := PriorityQueue withAll: #(2, 2, 2)
+    popped := q removeMin
+    self assert: (popped at: 1) equals: 2
+    self assert: (popped at: 2) size equals: 2
+    self assert: (popped at: 2) asSortedList equals: #(2, 2)
+
+  testAllElementsIdenticalDrainsCleanly =>
+    q := PriorityQueue withAll: #(7, 7, 7, 7)
+    self assert: q asSortedList equals: #(7, 7, 7, 7)
+
+  // === Custom comparators ===
+  testSortedByGivesMaxHeap =>
+    q := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(5, 1, 9, 3)
+    self assert: q peek equals: 9
+    self assert: q asSortedList equals: #(9, 5, 3, 1)
+
+  testComparatorSurvivesAddAndRemove =>
+    q := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(5, 1, 9)
+    rest := (q removeMin) at: 2
+    self assert: rest peek equals: 5
+    self assert: (rest add: 100) peek equals: 100
+
+  testComparatorOnStringLengths =>
+    q := (PriorityQueue sortedBy: [:a :b |
+      a size <= b size
+    ]) addAll: #("mmmm", "z", "ccc", "yy")
+    self assert: q peek equals: "z"
+    self assert: q asSortedList equals: #("z", "yy", "ccc", "mmmm")
+
+  testComparatorAccessor =>
+    self assert: (PriorityQueue new comparator value: 1 value: 2) equals: true
+    self assert: (PriorityQueue new comparator value: 2 value: 1) equals: false
+
+  testOrderingTokens =>
+    self assert: PriorityQueue new ordering equals: #natural
+    self assert: (PriorityQueue sortedBy: [:a :b |
+      a >= b
+    ] labelled: #desc) ordering equals: #desc
+
+  // === merge: ===
+  testMergeCombinesBothQueues =>
+    a := PriorityQueue withAll: #(5, 1)
+    b := PriorityQueue withAll: #(3, 9)
+    merged := a merge: b
+    self assert: merged size equals: 4
+    self assert: merged peek equals: 1
+    self assert: merged asSortedList equals: #(1, 3, 5, 9)
+
+  testMergeWithEmptyQueues =>
+    a := PriorityQueue withAll: #(2, 8)
+    empty := PriorityQueue new
+    self assert: (a merge: empty) asSortedList equals: #(2, 8)
+    self assert: (empty merge: a) asSortedList equals: #(2, 8)
+    self assert: (empty merge: PriorityQueue new) isEmpty equals: true
+
+  testMergeLeavesOperandsUnchanged =>
+    a := PriorityQueue withAll: #(5, 1)
+    b := PriorityQueue withAll: #(3)
+    a merge: b
+    self assert: a size equals: 2
+    self assert: b size equals: 1
+
+  testMergeOfCustomQueuesSharingAComparatorBlock =>
+    byDescending := [:a :b | a >= b]
+    left := (PriorityQueue sortedBy: byDescending) addAll: #(1, 6)
+    right := (PriorityQueue sortedBy: byDescending) addAll: #(4, 9)
+    merged := left merge: right
+    self assert: merged peek equals: 9
+    self assert: merged asSortedList equals: #(9, 6, 4, 1)
+
+  testMergeOfSeparatelyLabelledQueues =>
+    left := (PriorityQueue sortedBy: [:a :b | a >= b] labelled: #desc) add: 1
+    right := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #desc) add: 9
+    self assert: (left merge: right) peek equals: 9
+
+  testMergeRejectsMismatchedComparators =>
+    minHeap := PriorityQueue withAll: #(1, 2)
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(3, 4)
+    self should: [minHeap merge: maxHeap] raise: #user_error
+    self should: [maxHeap merge: minHeap] raise: #user_error
+
+  testMergeRejectsDifferentLabels =>
+    a := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #alpha) add: 1
+    b := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #beta) add: 2
+    self should: [a merge: b] raise: #user_error
+
+  // === Empty-queue behaviour ===
+  testPeekOnEmptyRaises =>
+    self should: [PriorityQueue new peek] raise: #user_error
+
+  testRemoveMinOnEmptyRaises =>
+    self should: [PriorityQueue new removeMin] raise: #user_error
+
+  testDrainedQueueRaisesAgain =>
+    drained := (PriorityQueue withAll: #(1)) removeMin at: 2
+    self assert: drained isEmpty equals: true
+    self should: [drained peek] raise: #user_error
+    self should: [drained removeMin] raise: #user_error
+
+  testPeekIfEmptyOnEmptyDoesNotRaise =>
+    self assert: (PriorityQueue new peekIfEmpty: [0]) equals: 0
+    self assert: (PriorityQueue new peekIfEmpty: [nil]) equals: nil
+
+  testPeekIfEmptyOnNonEmptyReturnsMinimum =>
+    self assert: ((PriorityQueue withAll: #(5, 1)) peekIfEmpty: [0]) equals: 1
+
+  testRemoveMinIfEmptyOnEmptyDoesNotRaise =>
+    self assert: (PriorityQueue new removeMinIfEmpty: [nil]) equals: nil
+    self assert: (PriorityQueue new removeMinIfEmpty: [#none]) equals: #none
+
+  testRemoveMinIfEmptyOnNonEmptyPops =>
+    // `removeMinIfEmpty:` is typed `Tuple | Object`, so `at:` needs the
+    // type-erasure escape hatch even though this branch always yields a Tuple.
+    popped := (PriorityQueue withAll: #(5, 1)) removeMinIfEmpty: [nil]
+    @expect type
+    self assert: (popped at: 1) equals: 1
+    @expect type
+    self assert: (popped at: 2) size equals: 1
+
+  // === size tracking ===
+  testSizeAcrossAddsAndRemoves =>
+    q0 := PriorityQueue new
+    q1 := q0 add: 3
+    q2 := q1 add: 1
+    q3 := q2 addAll: #(7, 5)
+    self assert: q0 size equals: 0
+    self assert: q1 size equals: 1
+    self assert: q2 size equals: 2
+    self assert: q3 size equals: 4
+    q4 := (q3 removeMin) at: 2
+    q5 := (q4 removeMin) at: 2
+    self assert: q4 size equals: 3
+    self assert: q5 size equals: 2
+    self assert: q5 isEmpty equals: false
+    q6 := (((q5 removeMin) at: 2) removeMin) at: 2
+    self assert: q6 size equals: 0
+    self assert: q6 isEmpty equals: true
+
+  testSizeAfterMerge =>
+    a := PriorityQueue withAll: #(1, 2, 3)
+    b := PriorityQueue withAll: #(4, 5)
+    self assert: (a merge: b) size equals: 5
+    self assert: (a merge: PriorityQueue new) size equals: 3
+
+  testSizeCountsDuplicates =>
+    self assert: (PriorityQueue withAll: #(1, 1, 1)) size equals: 3
+
+  // === Iteration ===
+  testDoVisitsEveryElementExactlyOnce =>
+    q := PriorityQueue withAll: #(4, 1, 7, 1)
+    visited := q asList
+    self assert: visited size equals: 4
+    self assert: visited sort equals: #(1, 1, 4, 7)
+
+  testDoOnEmptyQueueVisitsNothing =>
+    self assert: PriorityQueue new asList equals: #()
+
+  testDoYieldsMinimumFirst =>
+    q := PriorityQueue withAll: #(9, 2, 6)
+    self assert: q asList first equals: 2
+
+  testInheritedCollectionProtocol =>
+    q := PriorityQueue withAll: #(4, 1, 7)
+    self assert: (q includes: 7) equals: true
+    self assert: (q includes: 3) equals: false
+    self assert: (q count: [:x | x > 3]) equals: 2
+    self assert: (q inject: 0 into: [:sum :x | sum + x]) equals: 12
+    self assert: (q anySatisfy: [:x | x > 5]) equals: true
+    self assert: (q allSatisfy: [:x | x > 0]) equals: true
+
+  // === asSortedList ===
+  testAsSortedListLeavesReceiverIntact =>
+    q := PriorityQueue withAll: #(3, 1, 2)
+    self assert: q asSortedList equals: #(1, 2, 3)
+    self assert: q size equals: 3
+    self assert: q asSortedList equals: #(1, 2, 3)
+
+  testAsSortedListOnSingleton =>
+    self assert: (PriorityQueue withAll: #(42)) asSortedList equals: #(42)
+
+  // === Stale-entry workaround for the missing decrease-key ===
+  testStaleEntryWorkaroundForDecreaseKey =>
+    // The documented Dijkstra pattern: push a duplicate at the lower priority
+    // and skip the stale one on the way out. Entries are {cost, node} pairs.
+    byCost := [:a :b | (a at: 1) <= (b at: 1)]
+    q := (PriorityQueue sortedBy: byCost) addAll: #((Tuple withAll: #(10, #b)), (Tuple withAll: #(4, #b)), (Tuple withAll: #(7, #c)))
+    best := #{#b => 4, #c => 7}
+    live := q asSortedList select: [:entry |
+      (entry at: 1) =:= (best at: (entry at: 2))
+    ]
+    self assert: live size equals: 2
+    self assert: (live first at: 1) equals: 4
+    self assert: (live first at: 2) equals: #b

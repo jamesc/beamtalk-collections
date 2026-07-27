@@ -1,0 +1,402 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// PriorityQueue — Immutable priority queue backed by a pairing heap.
+///
+/// A pairing heap is a self-adjusting, heap-ordered multiway tree. `add:` and
+/// `merge:` are O(1) — they link two trees and stop — and `removeMin` is
+/// O(log n) amortised. It is by far the smallest heap that reaches those
+/// bounds, which is why it is the right shape for a persistent structure:
+/// a leftist or binomial heap needs rank bookkeeping on every node to do the
+/// same job.
+///
+/// Every operation returns a *new* queue. The receiver is never modified, so
+/// old versions stay valid and cheap to keep around.
+///
+/// ## Ordering
+///
+/// Order is decided by a two-argument comparator block returning a Boolean —
+/// the same convention as `List>>sort:`. The block answers "should `a` come
+/// out before `b`?". The default is `[:a :b | a <= b]`, a min-heap.
+///
+/// ## Duplicates
+///
+/// A PriorityQueue is a heap, not a set. Equal elements are all kept and all
+/// come back out.
+///
+/// ## Iteration order
+///
+/// `do:` (and everything built on it — `collect:`, `select:`, `asList`,
+/// `includes:`, …) visits elements in *heap order*, which is not sorted
+/// order. Only the minimum is known to come first. Use `asSortedList` when
+/// you actually want ordered output.
+///
+/// ## No decrease-key
+///
+/// There is no `decreaseKey:`, and there cannot be an efficient one here: a
+/// persistent structure hands out no stable node handles to decrease, and
+/// finding an element costs O(n). If you are writing Dijkstra or A*, use the
+/// standard workaround — push a *duplicate* entry at the lower priority and
+/// skip stale entries when you pop them:
+///
+/// ```beamtalk
+/// // pop, then discard entries whose recorded cost is out of date
+/// popped := queue removeMin
+/// entry := popped at: 1
+/// queue := popped at: 2
+/// (entry at: 1) =:= (best at: (entry at: 2)) ifTrue: [ "…relax neighbours…" ]
+/// ```
+///
+/// ## Examples
+///
+/// ```beamtalk
+/// PriorityQueue new isEmpty                             // => true
+/// (PriorityQueue withAll: #(5, 1, 3)) peek              // => 1
+/// (PriorityQueue withAll: #(5, 1, 3)) asSortedList      // => #(1, 3, 5)
+/// (PriorityQueue withAll: #(5, 1, 3)) size              // => 3
+/// max := PriorityQueue sortedBy: [:a :b | a >= b]
+/// (max addAll: #(5, 1, 3)) peek                         // => 5
+/// ```
+typed Collection(E) subclass: PriorityQueue(E)
+  /// Root of the pairing heap: `nil`, or a `{element, childNodes}` Tuple.
+  field: root :: Object = nil
+  /// Element count, tracked so `size` stays O(1).
+  field: count :: Integer = 0
+  /// Two-argument ordering block; `true` means "left comes out first".
+  /// Block parameters cannot carry type annotations, so the default literal's
+  /// `a`/`b` infer as Dynamic — expected, not a latent bug.
+  @expect type
+  field: comparator :: Block(E, E, Boolean) = [:a :b | a <= b]
+  /// Identity token for the comparator, compared by `merge:` (see `ordering`).
+  field: ordering :: Object = #natural
+
+  // === Construction ===
+
+  /// Create an empty queue ordered by `comparator`.
+  ///
+  /// The comparator takes two elements and answers whether the first should
+  /// come out first — the same shape as `List>>sort:`.
+  ///
+  /// The queue's *ordering token* (see `ordering`) is the block itself, so two
+  /// queues built from the same block value may be merged. Two queues built
+  /// from two separately written block literals may not, even if the literals
+  /// read identically — use `sortedBy:labelled:` to declare them equivalent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// maxHeap := PriorityQueue sortedBy: [:a :b | a >= b]
+  /// (maxHeap addAll: #(1, 9, 4)) peek       // => 9
+  /// (maxHeap addAll: #(1, 9, 4)) size       // => 3
+  /// ```
+  class sortedBy: comparator :: Block(E, E, Boolean) -> PriorityQueue(E) =>
+    PriorityQueue sortedBy: comparator labelled: comparator
+
+  /// Create an empty queue ordered by `comparator`, tagged with `label`.
+  ///
+  /// `merge:` compares ordering tokens, not blocks, so giving two
+  /// independently written comparators the same `label` declares them
+  /// interchangeable and lets their queues merge. The label may be any value;
+  /// a Symbol such as `#byPriority` is the usual choice.
+  ///
+  /// It is on the caller to only share a label between comparators that really
+  /// do impose the same order — a mismatched pair produces a queue whose
+  /// `peek` is not the minimum.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending
+  /// b := PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending
+  /// ((a add: 1) merge: (b add: 9)) peek     // => 9
+  /// ```
+  class sortedBy: comparator :: Block(E, E, Boolean) labelled: label :: Object -> PriorityQueue(E) =>
+    PriorityQueue new: #{
+      #root => nil,
+      #count => 0,
+      #comparator => comparator,
+      #ordering => label
+    }
+
+  /// Create a queue containing every element of `list`, in default order.
+  ///
+  /// O(n) — each `add:` is O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(3, 1, 2)) peek           // => 1
+  /// (PriorityQueue withAll: #(3, 1, 2)) size           // => 3
+  /// (PriorityQueue withAll: #()) isEmpty               // => true
+  /// ```
+  class withAll: list :: List(E) -> PriorityQueue(E) =>
+    list inject: PriorityQueue new into: [:heap :elem | heap add: elem]
+
+  // === Accessors ===
+
+  /// Number of elements. O(1) — the count is carried in the queue's state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(1, 1, 2)) size    // => 3
+  /// PriorityQueue new size                      // => 0
+  /// ```
+  size -> Integer => self.count
+
+  /// Test whether the queue holds no elements. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// PriorityQueue new isEmpty                   // => true
+  /// (PriorityQueue new add: 1) isEmpty          // => false
+  /// ```
+  isEmpty -> Boolean => self.count =:= 0
+
+  /// The ordering block this queue compares elements with.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue new comparator) value: 1 value: 2   // => true
+  /// ```
+  comparator -> Block(E, E, Boolean) => self.comparator
+
+  /// The queue's ordering token — the value `merge:` checks for compatibility.
+  ///
+  /// `PriorityQueue new` uses `#natural`; `sortedBy:` uses the comparator block
+  /// itself; `sortedBy:labelled:` uses the label you supply. Tokens are
+  /// compared with `=:=`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// PriorityQueue new ordering                                    // => #natural
+  /// (PriorityQueue sortedBy: [:a :b | a >= b] labelled: #desc) ordering  // => #desc
+  /// ```
+  ordering -> Object => self.ordering
+
+  // === Adding ===
+
+  /// Return a new queue with `element` added. O(1).
+  ///
+  /// Duplicates are kept — a heap is not a set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue new add: 4) peek                    // => 4
+  /// ((PriorityQueue new add: 4) add: 2) peek           // => 2
+  /// (((PriorityQueue new add: 4) add: 4) size)         // => 2
+  /// ```
+  add: element :: E -> PriorityQueue(E) =>
+    self withRoot: (self link: self.root with: (Tuple withAll: #(element, #()))) count: self.count + 1
+
+  /// Return a new queue with every element of `elements` added. O(n).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue new addAll: #(3, 1, 2)) peek        // => 1
+  /// (PriorityQueue new addAll: #(3, 1, 2)) size        // => 3
+  /// ```
+  addAll: elements :: Collection(E) -> PriorityQueue(E) =>
+    elements inject: self into: [:heap :elem | heap add: elem]
+
+  /// Return the union of this queue and `other`. O(1).
+  ///
+  /// Both queues must share an ordering token — see `ordering`. Merging
+  /// queues with different tokens raises an error rather than silently
+  /// producing a heap whose `peek` is wrong.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := PriorityQueue withAll: #(5, 1)
+  /// b := PriorityQueue withAll: #(3, 9)
+  /// (a merge: b) peek                                  // => 1
+  /// (a merge: b) size                                  // => 4
+  /// (a merge: b) asSortedList                          // => #(1, 3, 5, 9)
+  /// ```
+  merge: other :: PriorityQueue(E) -> PriorityQueue(E) =>
+    (self.ordering =:= other ordering)
+      ifFalse: [
+        self error: "PriorityQueue>>merge: requires both queues to share an ordering token; see PriorityQueue class>>sortedBy:labelled:"
+      ]
+    self withRoot: (self link: self.root with: other rootNode) count: self.count + other size
+
+  // === Removing ===
+
+  /// Return the minimum element without removing it. O(1).
+  ///
+  /// "Minimum" means whichever element the comparator ranks first. Raises an
+  /// error on an empty queue — use `peekIfEmpty:` for the non-raising path.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(5, 1, 3)) peek           // => 1
+  /// ```
+  peek -> E =>
+    self.root isNil
+      ifTrue: [self error: "PriorityQueue>>peek on an empty queue"]
+      ifFalse: [
+        {element, _children} := self.root
+        element
+      ]
+
+  /// Return the minimum element, or the value of `emptyBlock` if empty. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(5, 1)) peekIfEmpty: [0]  // => 1
+  /// PriorityQueue new peekIfEmpty: [0]                 // => 0
+  /// ```
+  peekIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self.root isNil
+      ifTrue: [emptyBlock value]
+      ifFalse: [
+        {element, _children} := self.root
+        element
+      ]
+
+  /// Remove the minimum element, returning a `{element, queue}` Tuple.
+  ///
+  /// O(log n) amortised. The same shape as `Queue>>dequeue`: element first,
+  /// the remaining queue second. Raises an error on an empty queue — use
+  /// `removeMinIfEmpty:` for the non-raising path.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// popped := (PriorityQueue withAll: #(5, 1, 3)) removeMin
+  /// popped at: 1                                       // => 1
+  /// (popped at: 2) size                                // => 2
+  /// (popped at: 2) peek                                // => 3
+  /// ```
+  removeMin -> Tuple =>
+    self.root isNil ifTrue: [
+      self error: "PriorityQueue>>removeMin on an empty queue"
+    ] ifFalse: [self popRoot]
+
+  /// Remove the minimum, or answer the value of `emptyBlock` if empty.
+  ///
+  /// Returns the same `{element, queue}` Tuple as `removeMin` when non-empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((PriorityQueue withAll: #(5, 1)) removeMinIfEmpty: [nil]) at: 1  // => 1
+  /// PriorityQueue new removeMinIfEmpty: [nil]                         // => nil
+  /// ```
+  removeMinIfEmpty: emptyBlock :: Block(Object) -> Tuple | Object =>
+    self.root isNil ifTrue: [emptyBlock value] ifFalse: [self popRoot]
+
+  // === Iteration and conversion ===
+
+  /// Evaluate `block` with each element, in **heap order — not sorted order**.
+  ///
+  /// Heap order only guarantees that a parent precedes its children, so the
+  /// minimum comes first and the rest arrive in an unspecified order. Every
+  /// inherited `Collection` method built on `do:` (`collect:`, `select:`,
+  /// `asList`, `detect:`, …) inherits that same lack of order. Use
+  /// `asSortedList` when order matters.
+  ///
+  /// Note that `collect:` and `select:` build their result via
+  /// `PriorityQueue class>>withAll:`, so they answer a queue with the
+  /// *default* ordering, not the receiver's comparator.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(1, 2, 3)) do: [:x | Transcript show: x printString]
+  /// (PriorityQueue withAll: #(1, 2, 3)) asList size    // => 3
+  /// (PriorityQueue withAll: #(1, 2, 3)) asList sort    // => #(1, 2, 3)
+  /// ```
+  do: block :: Block(E, Object) -> Nil => self eachFrom: self.root do: block
+
+  /// Drain the whole queue into a sorted `List`. O(n log n).
+  ///
+  /// This is the ordered view of the queue: repeated `removeMin` until empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(3, 1, 2)) asSortedList   // => #(1, 2, 3)
+  /// (PriorityQueue withAll: #(1, 1, 2)) asSortedList   // => #(1, 1, 2)
+  /// PriorityQueue new asSortedList                     // => #()
+  /// ```
+  asSortedList -> List(E) => self drainInto: #()
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// PriorityQueue new printString                      // => "PriorityQueue(0)"
+  /// (PriorityQueue withAll: #(1, 2)) printString       // => "PriorityQueue(2)"
+  /// ```
+  printString -> String => "PriorityQueue(" ++ self.count printString ++ ")"
+
+  // === Internals ===
+
+  /// The raw pairing-heap root, so `merge:` can reach another queue's tree.
+  internal rootNode -> Object => self.root
+
+  /// Shared body of `removeMin` / `removeMinIfEmpty:`; assumes a non-nil root.
+  internal popRoot -> Tuple =>
+    {element, children} := self.root
+    Tuple withAll: #(element, (self withRoot: (self mergePairs: children) count: self.count - 1))
+
+  /// Build a sibling queue that keeps this one's comparator and ordering.
+  internal withRoot: newRoot :: Object count: newCount :: Integer -> PriorityQueue(E) =>
+    PriorityQueue
+      new: #{
+        #root => newRoot,
+        #count => newCount,
+        #comparator => self.comparator,
+        #ordering => self.ordering
+      }
+
+  /// Link two heap nodes into one, keeping the comparator-preferred root. O(1).
+  internal link: a :: Object with: b :: Object -> Object =>
+    a isNil
+      ifTrue: [b]
+      ifFalse: [
+        b isNil
+          ifTrue: [a]
+          ifFalse: [
+            {aElement, aChildren} := a
+            {bElement, bChildren} := b
+            (self.comparator value: aElement value: bElement) ifTrue: [
+              Tuple withAll: #(aElement, (aChildren addFirst: b))
+            ] ifFalse: [Tuple withAll: #(bElement, (bChildren addFirst: a))]
+          ]
+      ]
+
+  /// Two-pass merge of a node's children — the step that gives `removeMin`
+  /// its O(log n) amortised bound. Pass one links children pairwise
+  /// left-to-right; `pairUp:acc:` returns those pairs reversed, so folding the
+  /// result left-to-right here *is* the classic right-to-left second pass.
+  internal mergePairs: nodes :: List(Object) -> Object =>
+    (self pairUp: nodes acc: #()) inject: nil into: [:acc :node |
+      self link: acc with: node
+    ]
+
+  /// Tail-recursive first pass: link adjacent children, accumulating in
+  /// reverse.
+  internal pairUp: nodes :: List(Object) acc: acc :: List(Object) -> List(Object) =>
+    nodes isEmpty
+      ifTrue: [acc]
+      ifFalse: [
+        rest := nodes drop: 1
+        rest isEmpty
+          ifTrue: [acc addFirst: nodes first]
+          ifFalse: [
+            self pairUp: (rest drop: 1) acc: (acc addFirst: (self link: nodes first with: rest first))
+          ]
+      ]
+
+  /// Depth-first walk of the heap, applying `block` to each element.
+  internal eachFrom: node :: Object do: block :: Block(E, Object) -> Nil =>
+    node isNil
+      ifFalse: [
+        {element, children} := node
+        block value: element
+        children do: [:child | self eachFrom: child do: block]
+      ]
+    nil
+
+  /// Tail-recursive drain used by `asSortedList`; `acc` builds up reversed.
+  internal drainInto: acc :: List(E) -> List(E) =>
+    self isEmpty
+      ifTrue: [acc reversed]
+      ifFalse: [
+        popped := self removeMin
+        (popped at: 2) drainInto: (acc addFirst: (popped at: 1))
+      ]
