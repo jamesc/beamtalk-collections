@@ -1,0 +1,278 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for collections@SortedSet — the ordered, balanced-tree set.
+
+TestCase subclass: SortedSetTest
+
+  // === Helpers ===
+
+  // Set holding 1, 3, 5, built out of order and with a duplicate.
+  internal sample => SortedSet withAll: #(5, 1, 3, 1)
+
+  // First element `do:` visits, or nil for an empty set.
+  internal firstVisitedIn: aSet =>
+    aSet do: [:e | ^e]
+    nil
+
+  // === Construction and size ===
+  testNewIsEmpty =>
+    self assert: SortedSet new size equals: 0
+    self assert: SortedSet new isEmpty equals: true
+    self assert: SortedSet new isNotEmpty equals: false
+
+  testWithAllDiscardsDuplicates =>
+    self assert: self sample size equals: 3
+    self assert: self sample asList equals: #(1, 3, 5)
+
+  testWithAllFromAnotherSortedSet =>
+    self assert: (SortedSet withAll: self sample) asList equals: #(1, 3, 5)
+
+  testSortedByWithAll =>
+    s := SortedSet sortedBy: [:a :b | a >= b] withAll: #(1, 3, 5)
+    self assert: s asList equals: #(5, 3, 1)
+
+  testPrintString =>
+    self assert: SortedSet new printString equals: "SortedSet(0)"
+    self assert: self sample printString equals: "SortedSet(3)"
+
+  // === Membership ===
+  testIncludes =>
+    self assert: (self sample includes: 3) equals: true
+    self assert: (self sample includes: 4) equals: false
+    self assert: (SortedSet new includes: 1) equals: false
+
+  testAddReturnsANewSet =>
+    original := self sample
+    updated := original add: 7
+    self assert: updated size equals: 4
+    self assert: original size equals: 3
+    self assert: (original includes: 7) equals: false
+
+  testAddingAnExistingElementIsANoOp =>
+    self assert: (self sample add: 3) size equals: 3
+
+  testRemove =>
+    s := self sample remove: 3
+    self assert: s size equals: 2
+    self assert: s asList equals: #(1, 5)
+
+  testRemoveMissingElementIsANoOp =>
+    self assert: (self sample remove: 4) size equals: 3
+    self assert: (SortedSet new remove: 4) isEmpty equals: true
+
+  testRemoveEveryElementEmptiesTheSet =>
+    s := #(1, 3, 5) inject: self sample into: [:acc :e | acc remove: e]
+    self assert: s isEmpty equals: true
+    self assert: s asList equals: #()
+
+  // === Ordered traversal ===
+  testDoIteratesInOrder =>
+    self assert: (self firstVisitedIn: self sample) equals: 1
+    self assert: (self firstVisitedIn: SortedSet new) equals: nil
+    self assert: (self sample inject: 0 into: [:acc :e |
+      (acc * 10) + e
+    ]) equals: 135
+
+  testAsListIsOrdered =>
+    self assert: (SortedSet withAll: #(9, 2, 7, 2)) asList equals: #(2, 7, 9)
+    self assert: SortedSet new asList equals: #()
+
+  testAsSet =>
+    core := self sample asSet
+    self assert: core size equals: 3
+    self assert: (core includes: 3) equals: true
+
+  testAsSortedSetIsIdentity =>
+    self assert: self sample asSortedSet asList equals: #(1, 3, 5)
+
+  // === Ends ===
+  testMinMaxFirstLast =>
+    self assert: self sample min equals: 1
+    self assert: self sample max equals: 5
+    self assert: self sample first equals: 1
+    self assert: self sample last equals: 5
+
+  testSingletonEnds =>
+    s := SortedSet new add: 7
+    self assert: s min equals: 7
+    self assert: s max equals: 7
+
+  testEmptyMinRaises => self should: [SortedSet new min] raise: #user_error
+
+  testEmptyMaxRaises => self should: [SortedSet new max] raise: #user_error
+
+  testEmptyFirstRaises => self should: [SortedSet new first] raise: #user_error
+
+  testEmptyLastRaises => self should: [SortedSet new last] raise: #user_error
+
+  // === floor: / ceiling: ===
+  testFloorExactHit => self assert: (self sample floor: 3) equals: 3
+
+  testFloorBetweenElements => self assert: (self sample floor: 4) equals: 3
+
+  testFloorAboveMaxIsTheMax => self assert: (self sample floor: 99) equals: 5
+
+  testFloorBelowMinRaises =>
+    self should: [self sample floor: 0] raise: #user_error
+
+  testFloorOnEmptyRaises =>
+    self should: [SortedSet new floor: 1] raise: #user_error
+
+  testFloorIfAbsent =>
+    self assert: (self sample floor: 0 ifAbsent: [#none]) equals: #none
+    self assert: (self sample floor: 4 ifAbsent: [#none]) equals: 3
+
+  testCeilingExactHit => self assert: (self sample ceiling: 3) equals: 3
+
+  testCeilingBetweenElements => self assert: (self sample ceiling: 4) equals: 5
+
+  testCeilingBelowMinIsTheMin => self assert: (self sample ceiling: 0) equals: 1
+
+  testCeilingAboveMaxRaises =>
+    self should: [self sample ceiling: 99] raise: #user_error
+
+  testCeilingOnEmptyRaises =>
+    self should: [SortedSet new ceiling: 1] raise: #user_error
+
+  testCeilingIfAbsent =>
+    self assert: (self sample ceiling: 99 ifAbsent: [#none]) equals: #none
+    self assert: (self sample ceiling: 4 ifAbsent: [#none]) equals: 5
+
+  // === Range scans ===
+  testFromToIsInclusiveOfBothBounds =>
+    self assert: ((self sample from: 1 to: 5) asList) equals: #(1, 3, 5)
+    self assert: ((self sample from: 1 to: 3) asList) equals: #(1, 3)
+
+  testFromToAcceptsBoundsThatAreNotMembers =>
+    self assert: ((self sample from: 2 to: 4) asList) equals: #(3)
+    self assert: ((self sample from: 0 to: 99) asList) equals: #(1, 3, 5)
+
+  testFromToEmptyRange =>
+    self assert: ((self sample from: 6 to: 9) isEmpty) equals: true
+    self assert: ((self sample from: 5 to: 1) isEmpty) equals: true
+
+  testFromToReturnsASortedSet =>
+    self assert: (self sample from: 1 to: 3) class name equals: #SortedSet
+
+  testFromToDoVisitsTheRange =>
+    counter := AtomicCounter new: #sortedSetFromToDo
+    self sample
+      from: 2
+      to: 5
+      do: [:e | counter incrementBy: e]
+    self assert: counter value equals: 8
+    counter delete
+
+  // === Set algebra ===
+  testUnion =>
+    united := (SortedSet withAll: #(1, 2)) union: (SortedSet withAll: #(2, 3))
+    self assert: united asList equals: #(1, 2, 3)
+
+  testUnionWithEmpty =>
+    self assert: (self sample union: SortedSet new) asList equals: #(1, 3, 5)
+    self assert: (SortedSet new union: self sample) asList equals: #(1, 3, 5)
+
+  testIntersection =>
+    both := (SortedSet withAll: #(1, 2, 3)) intersection: (SortedSet withAll: #(2, 3, 4))
+    self assert: both asList equals: #(2, 3)
+
+  testIntersectionWithEmpty =>
+    self assert: (self sample intersection: SortedSet new) asList equals: #()
+
+  testDifference =>
+    rest := (SortedSet withAll: #(1, 2, 3)) difference: (SortedSet withAll: #(2, 4))
+    self assert: rest asList equals: #(1, 3)
+
+  testDifferenceWithEmpty =>
+    self assert: (self sample difference: SortedSet new) asList equals: #(1, 3, 5)
+
+  // === Comparator identity ===
+  testDefaultOrderedSetsCombineFreely =>
+    a := SortedSet withAll: #(1)
+    b := SortedSet new add: 2
+    self assert: (a union: b) asList equals: #(1, 2)
+
+  testSetsSharingOneComparatorBlockCombine =>
+    descending := [:a :b | a >= b]
+    x := SortedSet sortedBy: descending withAll: #(1, 3)
+    y := SortedSet sortedBy: descending withAll: #(5)
+    self assert: (x union: y) asList equals: #(5, 3, 1)
+
+  testUnionRejectsMismatchedComparator =>
+    custom := SortedSet sortedBy: [:a :b | a >= b]
+    self should: [self sample union: custom] raise: #user_error
+
+  testIntersectionRejectsMismatchedComparator =>
+    custom := SortedSet sortedBy: [:a :b | a >= b]
+    self should: [self sample intersection: custom] raise: #user_error
+
+  testDifferenceRejectsMismatchedComparator =>
+    custom := SortedSet sortedBy: [:a :b | a >= b]
+    self should: [self sample difference: custom] raise: #user_error
+
+  testMismatchIsRejectedInBothDirections =>
+    custom := SortedSet sortedBy: [:a :b | a >= b]
+    self should: [custom union: self sample] raise: #user_error
+
+  // === Custom comparators ===
+  testDescendingComparator =>
+    s := SortedSet sortedBy: [:a :b | a >= b]
+    s := s add: 1
+    s := s add: 5
+    s := s add: 3
+    self assert: s asList equals: #(5, 3, 1)
+    self assert: s min equals: 5
+    self assert: s max equals: 1
+    self assert: (s floor: 4) equals: 5
+
+  testComparatorDecidesElementIdentity =>
+    // Ordered by string length, so only one string of each length survives.
+    s := SortedSet sortedBy: [:a :b | a size <= b size]
+    s := s add: "ab"
+    s := s add: "cd"
+    s := s add: "e"
+    self assert: s size equals: 2
+    self assert: (s includes: "zz") equals: true
+
+  testCustomComparatorSurvivesDerivedSets =>
+    s := SortedSet sortedBy: [:a :b |
+      a size <= b size
+    ] withAll: #("ccc", "a", "bb")
+    self assert: s asList equals: #("a", "bb", "ccc")
+    lowBound := "xx"
+    highBound := "yyy"
+    self assert: ((s from: lowBound to: highBound) asList) equals: #("bb", "ccc")
+    self assert: (s remove: "zz") asList equals: #("a", "ccc")
+
+  // === Balance ===
+  testAscendingInsertionStaysOrdered =>
+    // 1..500 added in ascending order — the degenerate case for an
+    // unbalanced BST.
+    s := (1 to: 500) inject: SortedSet new into: [:acc :i | acc add: i]
+    self assert: s size equals: 500
+    self assert: s asList equals: (1 to: 500) asList
+    self assert: s min equals: 1
+    self assert: s max equals: 500
+    self assert: (s includes: 250) equals: true
+    self assert: (s ceiling: 499) equals: 499
+
+  testAscendingInsertionStaysBalanced =>
+    s := (1 to: 500) inject: SortedSet new into: [:acc :i | acc add: i]
+    // A degenerate tree would be 500 deep; a weight-balanced tree with
+    // delta = 3 stays comfortably below 20 for this size.
+    self assert: (s root depth < 20) equals: true
+
+  testDescendingInsertionStaysBalanced =>
+    s := (1 to: 500) inject: SortedSet new into: [:acc :i | acc add: 501 - i]
+    self assert: s asList equals: (1 to: 500) asList
+    self assert: (s root depth < 20) equals: true
+
+  testRemovalKeepsOrderAndBalance =>
+    full := (1 to: 300) inject: SortedSet new into: [:acc :i | acc add: i]
+    pruned := (1 to: 150) inject: full into: [:acc :i | acc remove: i * 2]
+    self assert: pruned size equals: 150
+    self assert: pruned asList equals: ((1 to: 300) select: [:i |
+      i isOdd
+    ]) asList
+    self assert: (pruned root depth < 20) equals: true

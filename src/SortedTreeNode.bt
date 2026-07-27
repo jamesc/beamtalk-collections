@@ -1,0 +1,571 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SortedTreeNode — **internal** weight-balanced persistent binary search tree.
+///
+/// This is the shared ordered core behind `SortedMap` and `SortedSet`; it is an
+/// implementation detail of the `collections` package and **not part of its
+/// public API**. Reach for `SortedMap` / `SortedSet` instead — this class makes
+/// no compatibility promises.
+///
+/// ## Shape
+/// `SortedTreeNode new` is the empty tree: a sentinel node of `weight` 0 that
+/// answers every query without special-casing at the call site. A non-empty
+/// tree is a node carrying a key, a value, two subtrees, and `weight` — the
+/// number of non-empty nodes in the subtree rooted here. Every operation
+/// returns a new tree; nothing is mutated.
+///
+/// The sentinel is used rather than `nil` so that recursion is ordinary
+/// message dispatch on `Value` instances, which runs in the caller's process.
+/// Class-side methods would be dispatched through the class process instead,
+/// which breaks blocks that carry caller-local state.
+///
+/// ## Balance
+/// Weight-balanced (Adams / `Data.Map` style) with `delta = 3` and
+/// `ratio = 2`: after an insert or delete, a subtree whose weight exceeds
+/// `delta` times its sibling's is rotated back into balance, keeping depth
+/// O(log n) even for the degenerate case of inserting already-sorted keys.
+///
+/// ## Ordering
+/// All ordering flows through a caller-supplied comparator block
+/// `Block(K, K, Boolean)` meaning "a sorts at or before b" — the same
+/// convention as `List sort:`. Three-way comparison is derived by asking the
+/// block both ways round: `a <= b` and `b <= a` both true means "equal".
+///
+/// ## Examples
+/// ```beamtalk
+/// cmp := [:a :b | a <= b]
+/// t := SortedTreeNode new
+/// t := t insert: 2 val: "b" using: cmp
+/// t := t insert: 1 val: "a" using: cmp
+/// t weight                                 // => 2
+/// t at: 1 using: cmp ifAbsent: [nil]       // => "a"
+/// ```
+typed Value subclass: SortedTreeNode(K, V)
+  field: key :: K | Nil = nil
+  field: val :: V | Nil = nil
+  field: left :: SortedTreeNode(K, V) | Nil = nil
+  field: right :: SortedTreeNode(K, V) | Nil = nil
+  field: weight :: Integer = 0
+
+  // === Shape ===
+
+  /// Test whether this is the empty-tree sentinel.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new isEmptyNode   // => true
+  /// ```
+  isEmptyNode -> Boolean => self.weight =:= 0
+
+  /// Length of the longest root-to-leaf path, `0` for the empty tree. Not
+  /// needed by `SortedMap` or `SortedSet` themselves — it exists so tests can
+  /// assert the balance invariant directly.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new depth   // => 0
+  /// ```
+  depth -> Integer =>
+    self isEmptyNode ifTrue: [
+      0
+    ] ifFalse: [1 + (self.left depth max: self.right depth)]
+
+  /// Build a node from a key, a value and two already-balanced subtrees,
+  /// computing `weight` from the children.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// e := SortedTreeNode new
+  /// (e nodeWithKey: 1 val: "a" left: e right: e) weight   // => 1
+  /// ```
+  nodeWithKey: k :: K val: v :: V left: l :: SortedTreeNode(K, V) | Nil right: r :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    SortedTreeNode
+      new: #{
+        #key => k,
+        #val => v,
+        #left => l,
+        #right => r,
+        #weight => 1 + l weight + r weight
+      }
+
+  // === Balancing ===
+
+  /// Build a node from subtrees that may each be one insert or delete out of
+  /// balance, rotating as needed to restore the weight invariant.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// e := SortedTreeNode new
+  /// (e balancedKey: 1 val: "a" left: e right: e) weight   // => 1
+  /// ```
+  balancedKey: k :: K val: v :: V left: l :: SortedTreeNode(K, V) | Nil right: r :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    ln := l weight
+    rn := r weight
+    (ln + rn) <= 1
+      ifTrue: [
+        self
+          nodeWithKey: k
+          val: v
+          left: l
+          right: r
+      ]
+      ifFalse: [
+        rn > (3 * ln)
+          ifTrue: [
+            self
+              rotateLeftKey: k
+              val: v
+              left: l
+              right: r
+          ]
+          ifFalse: [
+            ln > (3 * rn)
+              ifTrue: [
+                self
+                  rotateRightKey: k
+                  val: v
+                  left: l
+                  right: r
+              ]
+              ifFalse: [
+                self
+                  nodeWithKey: k
+                  val: v
+                  left: l
+                  right: r
+              ]
+          ]
+      ]
+
+  /// Rotate a right-heavy node leftwards, single or double depending on the
+  /// shape of the right subtree.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Reached only from `balancedKey:val:left:right:`, when the right
+  /// // subtree outweighs the left by more than delta.
+  /// ```
+  rotateLeftKey: k :: K val: v :: V left: l :: SortedTreeNode(K, V) | Nil right: r :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    rl := r left
+    rr := r right
+    rl weight < (2 * rr weight)
+      ifTrue: [
+        self
+          nodeWithKey: r key
+          val: r val
+          left: (self
+            nodeWithKey: k
+            val: v
+            left: l
+            right: rl)
+          right: rr
+      ]
+      ifFalse: [
+        self
+          nodeWithKey: rl key
+          val: rl val
+          left: (self
+            nodeWithKey: k
+            val: v
+            left: l
+            right: rl left)
+          right: (self
+            nodeWithKey: r key
+            val: r val
+            left: rl right
+            right: rr)
+      ]
+
+  /// Rotate a left-heavy node rightwards, single or double depending on the
+  /// shape of the left subtree.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Reached only from `balancedKey:val:left:right:`, when the left
+  /// // subtree outweighs the right by more than delta.
+  /// ```
+  rotateRightKey: k :: K val: v :: V left: l :: SortedTreeNode(K, V) | Nil right: r :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    ll := l left
+    lr := l right
+    lr weight < (2 * ll weight)
+      ifTrue: [
+        self
+          nodeWithKey: l key
+          val: l val
+          left: ll
+          right: (self
+            nodeWithKey: k
+            val: v
+            left: lr
+            right: r)
+      ]
+      ifFalse: [
+        self
+          nodeWithKey: lr key
+          val: lr val
+          left: (self
+            nodeWithKey: l key
+            val: l val
+            left: ll
+            right: lr left)
+          right: (self
+            nodeWithKey: k
+            val: v
+            left: lr right
+            right: r)
+      ]
+
+  // === Comparison ===
+
+  /// Three-way comparison derived from a `Block(K, K, Boolean)` comparator:
+  /// `-1` when `a` sorts before `b`, `0` when they sort equal, `1` when after.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new compareKey: 1 to: 2 using: [:a :b | a <= b]   // => -1
+  /// SortedTreeNode new compareKey: 2 to: 2 using: [:a :b | a <= b]   // => 0
+  /// ```
+  compareKey: a :: K to: b :: K using: cmp :: Block(K, K, Boolean) -> Integer =>
+    (cmp value: a value: b) ifTrue: [
+      (cmp value: b value: a) ifTrue: [0] ifFalse: [-1]
+    ] ifFalse: [1]
+
+  // === Lookup ===
+
+  /// Value stored under `k`, or the result of `absentBlock` when no key
+  /// compares equal to it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new at: 1 using: [:a :b | a <= b] ifAbsent: [#none]   // => #none
+  /// ```
+  at: k :: K using: cmp :: Block(K, K, Boolean) ifAbsent: absentBlock :: Block(Object) -> V | Object =>
+    self isEmptyNode
+      ifTrue: [absentBlock value]
+      ifFalse: [
+        c := self
+          compareKey: k
+          to: self.key
+          using: cmp
+        c =:= 0
+          ifTrue: [self.val]
+          ifFalse: [
+            c < 0
+              ifTrue: [
+                self.left
+                  at: k
+                  using: cmp
+                  ifAbsent: absentBlock
+              ]
+              ifFalse: [
+                self.right
+                  at: k
+                  using: cmp
+                  ifAbsent: absentBlock
+              ]
+          ]
+      ]
+
+  /// Test whether any key in the tree compares equal to `k`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new containsKey: 1 using: [:a :b | a <= b]   // => false
+  /// ```
+  containsKey: k :: K using: cmp :: Block(K, K, Boolean) -> Boolean =>
+    self isEmptyNode
+      ifTrue: [false]
+      ifFalse: [
+        c := self
+          compareKey: k
+          to: self.key
+          using: cmp
+        c =:= 0
+          ifTrue: [true]
+          ifFalse: [
+            c < 0 ifTrue: [
+              self.left containsKey: k using: cmp
+            ] ifFalse: [self.right containsKey: k using: cmp]
+          ]
+      ]
+
+  /// Leftmost (smallest) node. The caller must ensure the tree is not empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedTreeNode new insert: 1 val: "a" using: [:a :b | a <= b]) minNode) key   // => 1
+  /// ```
+  minNode -> SortedTreeNode(K, V) | Nil =>
+    self.left isEmptyNode ifTrue: [self] ifFalse: [self.left minNode]
+
+  /// Rightmost (largest) node. The caller must ensure the tree is not empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedTreeNode new insert: 1 val: "a" using: [:a :b | a <= b]) maxNode) key   // => 1
+  /// ```
+  maxNode -> SortedTreeNode(K, V) | Nil =>
+    self.right isEmptyNode ifTrue: [self] ifFalse: [self.right maxNode]
+
+  /// Node holding the greatest key that sorts at or before `k`, or `best`
+  /// when every key sorts after it. Pass `nil` as `best` at the top level —
+  /// it is only ever carried through and returned, never messaged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new floorNodeFor: 1 using: [:a :b | a <= b] best: nil   // => nil
+  /// ```
+  floorNodeFor: k :: K using: cmp :: Block(K, K, Boolean) best: best :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    self isEmptyNode
+      ifTrue: [best]
+      ifFalse: [
+        (self
+          compareKey: self.key
+          to: k
+          using: cmp) <= 0
+          ifTrue: [
+            self.right
+              floorNodeFor: k
+              using: cmp
+              best: self
+          ]
+          ifFalse: [
+            self.left
+              floorNodeFor: k
+              using: cmp
+              best: best
+          ]
+      ]
+
+  /// Node holding the least key that sorts at or after `k`, or `best` when
+  /// every key sorts before it. Pass `nil` as `best` at the top level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new ceilingNodeFor: 1 using: [:a :b | a <= b] best: nil   // => nil
+  /// ```
+  ceilingNodeFor: k :: K using: cmp :: Block(K, K, Boolean) best: best :: SortedTreeNode(K, V) | Nil -> SortedTreeNode(K, V) | Nil =>
+    self isEmptyNode
+      ifTrue: [best]
+      ifFalse: [
+        (self
+          compareKey: self.key
+          to: k
+          using: cmp) >= 0
+          ifTrue: [
+            self.left
+              ceilingNodeFor: k
+              using: cmp
+              best: self
+          ]
+          ifFalse: [
+            self.right
+              ceilingNodeFor: k
+              using: cmp
+              best: best
+          ]
+      ]
+
+  // === Update ===
+
+  /// Tree with `k` bound to `v`, replacing any key that compares equal.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedTreeNode new insert: 1 val: "a" using: [:a :b | a <= b]) weight   // => 1
+  /// ```
+  insert: k :: K val: v :: V using: cmp :: Block(K, K, Boolean) -> SortedTreeNode(K, V) | Nil =>
+    self isEmptyNode
+      ifTrue: [
+        self
+          nodeWithKey: k
+          val: v
+          left: self
+          right: self
+      ]
+      ifFalse: [
+        c := self
+          compareKey: k
+          to: self.key
+          using: cmp
+        c =:= 0
+          ifTrue: [
+            self
+              nodeWithKey: k
+              val: v
+              left: self.left
+              right: self.right
+          ]
+          ifFalse: [
+            c < 0
+              ifTrue: [
+                self
+                  balancedKey: self.key
+                  val: self.val
+                  left: (self.left
+                    insert: k
+                    val: v
+                    using: cmp)
+                  right: self.right
+              ]
+              ifFalse: [
+                self
+                  balancedKey: self.key
+                  val: self.val
+                  left: self.left
+                  right: (self.right
+                    insert: k
+                    val: v
+                    using: cmp)
+              ]
+          ]
+      ]
+
+  /// Tree with its leftmost node removed. The caller must ensure the tree is
+  /// not empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedTreeNode new insert: 1 val: "a" using: [:a :b | a <= b]) deleteMin weight   // => 0
+  /// ```
+  deleteMin -> SortedTreeNode(K, V) | Nil =>
+    self.left isEmptyNode
+      ifTrue: [self.right]
+      ifFalse: [
+        self
+          balancedKey: self.key
+          val: self.val
+          left: self.left deleteMin
+          right: self.right
+      ]
+
+  /// The receiver's two subtrees joined into one balanced tree — the shape
+  /// left behind when the receiver's own key is deleted.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedTreeNode new insert: 1 val: "a" using: [:a :b | a <= b]) glued weight   // => 0
+  /// ```
+  glued -> SortedTreeNode(K, V) | Nil =>
+    self.left isEmptyNode
+      ifTrue: [self.right]
+      ifFalse: [
+        self.right isEmptyNode
+          ifTrue: [self.left]
+          ifFalse: [
+            successor := self.right minNode
+            self
+              balancedKey: successor key
+              val: successor val
+              left: self.left
+              right: self.right deleteMin
+          ]
+      ]
+
+  /// Tree with the key comparing equal to `k` removed; unchanged when absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedTreeNode new delete: 1 using: [:a :b | a <= b]) weight   // => 0
+  /// ```
+  delete: k :: K using: cmp :: Block(K, K, Boolean) -> SortedTreeNode(K, V) | Nil =>
+    self isEmptyNode
+      ifTrue: [self]
+      ifFalse: [
+        c := self
+          compareKey: k
+          to: self.key
+          using: cmp
+        c =:= 0
+          ifTrue: [self glued]
+          ifFalse: [
+            c < 0
+              ifTrue: [
+                self
+                  balancedKey: self.key
+                  val: self.val
+                  left: (self.left delete: k using: cmp)
+                  right: self.right
+              ]
+              ifFalse: [
+                self
+                  balancedKey: self.key
+                  val: self.val
+                  left: self.left
+                  right: (self.right delete: k using: cmp)
+              ]
+          ]
+      ]
+
+  // === Traversal ===
+
+  /// Fold every key-value pair in ascending comparator order, evaluating
+  /// `block` as `(accumulator, key, value)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new foldAcc: 0 block: [:acc :k :_v | acc + k]   // => 0
+  /// ```
+  foldAcc: acc :: A block: block :: Block(A, K, V, A) -> A =>
+    self isEmptyNode
+      ifTrue: [acc]
+      ifFalse: [
+        leftAcc := self.left foldAcc: acc block: block
+        nodeAcc := block
+          value: leftAcc
+          value: self.key
+          value: self.val
+        self.right foldAcc: nodeAcc block: block
+      ]
+
+  /// Fold only the key-value pairs whose key sorts within `[lo, hi]`
+  /// inclusive, in ascending comparator order, pruning subtrees that cannot
+  /// contribute.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedTreeNode new foldRangeFrom: 1 to: 9 using: [:a :b | a <= b] acc: 0 block: [:acc :k :_v | acc + k]
+  ///   // => 0
+  /// ```
+  foldRangeFrom: lo :: K to: hi :: K using: cmp :: Block(K, K, Boolean) acc: acc :: A block: block :: Block(A, K, V, A) -> A =>
+    self isEmptyNode
+      ifTrue: [acc]
+      ifFalse: [
+        aboveLo := (self
+          compareKey: self.key
+          to: lo
+          using: cmp) >= 0
+        belowHi := (self
+          compareKey: self.key
+          to: hi
+          using: cmp) <= 0
+        leftAcc := aboveLo
+          ifTrue: [
+            self.left
+              foldRangeFrom: lo
+              to: hi
+              using: cmp
+              acc: acc
+              block: block
+          ]
+          ifFalse: [acc]
+        nodeAcc := (aboveLo and: [belowHi])
+          ifTrue: [
+            block
+              value: leftAcc
+              value: self.key
+              value: self.val
+          ]
+          ifFalse: [leftAcc]
+        belowHi
+          ifTrue: [
+            self.right
+              foldRangeFrom: lo
+              to: hi
+              using: cmp
+              acc: nodeAcc
+              block: block
+          ]
+          ifFalse: [nodeAcc]
+      ]
