@@ -1,0 +1,306 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Deque — persistent double-ended queue (BT-3011)
+
+TestCase subclass: DequeTest
+
+  // === Construction ===
+  testNewIsEmpty =>
+    d := Deque new
+    self assert: d isEmpty
+    self assert: d size equals: 0
+    self assert: d asList equals: #()
+
+  testNewClass => self assert: Deque new class equals: Deque
+
+  testWithAll =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: d class equals: Deque
+    self assert: d size equals: 3
+    self assert: d asList equals: #(1, 2, 3)
+
+  testWithAllEmpty =>
+    d := Deque withAll: #()
+    self assert: d isEmpty
+    self assert: d size equals: 0
+
+  testWithAllSingleElement =>
+    d := Deque withAll: #(42)
+    self assert: d size equals: 1
+    self assert: d first equals: 42
+    self assert: d last equals: 42
+
+  // === Adding at both ends ===
+  testAddFirst =>
+    d := (Deque new addFirst: 2) addFirst: 1
+    self assert: d asList equals: #(1, 2)
+    self assert: d first equals: 1
+    self assert: d last equals: 2
+
+  testAddLast =>
+    d := (Deque new addLast: 1) addLast: 2
+    self assert: d asList equals: #(1, 2)
+    self assert: d first equals: 1
+    self assert: d last equals: 2
+
+  testAddBothEnds =>
+    d := ((Deque new addLast: 2) addFirst: 1) addLast: 3
+    self assert: d asList equals: #(1, 2, 3)
+    self assert: d size equals: 3
+
+  testAddIsImmutable =>
+    d := Deque withAll: #(1, 2)
+    d2 := d addLast: 3
+    self assert: d asList equals: #(1, 2)
+    self assert: d size equals: 2
+    self assert: d2 asList equals: #(1, 2, 3)
+
+  // === Removing at both ends ===
+  testRemoveFirst =>
+    result := (Deque withAll: #(1, 2, 3)) removeFirst
+    self assert: (result at: 1) equals: 1
+    self assert: (result at: 2) asList equals: #(2, 3)
+    self assert: (result at: 2) size equals: 2
+
+  testRemoveLast =>
+    result := (Deque withAll: #(1, 2, 3)) removeLast
+    self assert: (result at: 1) equals: 3
+    self assert: (result at: 2) asList equals: #(1, 2)
+    self assert: (result at: 2) size equals: 2
+
+  testRemoveFirstIsImmutable =>
+    d := Deque withAll: #(1, 2, 3)
+    d removeFirst
+    self assert: d asList equals: #(1, 2, 3)
+
+  testRemoveFirstDownToEmpty =>
+    d := Deque withAll: #(1, 2)
+    r1 := d removeFirst
+    self assert: (r1 at: 1) equals: 1
+    r2 := (r1 at: 2) removeFirst
+    self assert: (r2 at: 1) equals: 2
+    self assert: (r2 at: 2) isEmpty
+    self assert: (r2 at: 2) size equals: 0
+
+  testRemoveLastDownToEmpty =>
+    d := Deque withAll: #(1, 2)
+    r1 := d removeLast
+    self assert: (r1 at: 1) equals: 2
+    r2 := (r1 at: 2) removeLast
+    self assert: (r2 at: 1) equals: 1
+    self assert: (r2 at: 2) isEmpty
+
+  testRemoveSingleElement =>
+    result := (Deque withAll: #(7)) removeFirst
+    self assert: (result at: 1) equals: 7
+    self assert: (result at: 2) isEmpty
+    result2 := (Deque withAll: #(7)) removeLast
+    self assert: (result2 at: 1) equals: 7
+    self assert: (result2 at: 2) isEmpty
+
+  // === Peeking ===
+  testFirstAndLast =>
+    d := Deque withAll: #(1, 2, 3, 4)
+    self assert: d first equals: 1
+    self assert: d last equals: 4
+
+  testFirstAndLastSingleElement =>
+    d := Deque new addFirst: 9
+    self assert: d first equals: 9
+    self assert: d last equals: 9
+
+  // === Rebalance path ===
+
+  // Fill entirely from the back, drain entirely from the front. Every element
+  // enters via `rear` and leaves via `front`, so the deque must rebalance.
+  testRebalanceFillRearDrainFront =>
+    d := Deque withAll: (1 to: 20) asList
+    self assert: d size equals: 20
+    drained := self drainFront: d
+    self assert: drained equals: (1 to: 20) asList
+
+  // Mirror image: fill entirely from the front, drain entirely from the back.
+  testRebalanceFillFrontDrainRear =>
+    d := (1 to: 20) asList inject: Deque new into: [:acc :x | acc addFirst: x]
+    self assert: d size equals: 20
+    self assert: d asList equals: (20 to: 1 by: -1) asList
+    drained := self drainRear: d
+    self assert: drained equals: (1 to: 20) asList
+
+  // Fill from the front and drain from the front — a LIFO stack usage pattern.
+  testRebalanceFillFrontDrainFront =>
+    d := (1 to: 15) asList inject: Deque new into: [:acc :x | acc addFirst: x]
+    drained := self drainFront: d
+    self assert: drained equals: (15 to: 1 by: -1) asList
+    self assert: drained size equals: 15
+
+  // Fill from the back and drain from the back.
+  testRebalanceFillRearDrainRear =>
+    d := Deque withAll: (1 to: 15) asList
+    drained := self drainRear: d
+    self assert: drained equals: (15 to: 1 by: -1) asList
+
+  // Size stays correct across every step of a rebalancing drain.
+  testSizeCorrectWhileDraining =>
+    d := Deque withAll: (1 to: 10) asList
+    sizes := self drainFrontSizes: d
+    self assert: sizes equals: #(10, 9, 8, 7, 6, 5, 4, 3, 2, 1)
+
+  // Interleaved pushes and pops at both ends keep the deque consistent.
+  testInterleavedBothEnds =>
+    d := Deque new
+    d := d addLast: 1
+    d := d addLast: 2
+    d := d addFirst: 0
+    self assert: d asList equals: #(0, 1, 2)
+    r := d removeLast
+    self assert: (r at: 1) equals: 2
+    d := (r at: 2) addLast: 3
+    self assert: d asList equals: #(0, 1, 3)
+    r2 := d removeFirst
+    self assert: (r2 at: 1) equals: 0
+    self assert: (r2 at: 2) asList equals: #(1, 3)
+    self assert: (r2 at: 2) size equals: 2
+
+  // === Empty-end errors ===
+  testRemoveFirstOnEmptyRaises =>
+    self should: [Deque new removeFirst] raise: #user_error
+
+  testRemoveLastOnEmptyRaises =>
+    self should: [Deque new removeLast] raise: #user_error
+
+  testFirstOnEmptyRaises => self should: [Deque new first] raise: #user_error
+
+  testLastOnEmptyRaises => self should: [Deque new last] raise: #user_error
+
+  testDrainedEmptyStillRaises =>
+    d := Deque withAll: #(1)
+    empty := (d removeFirst) at: 2
+    self should: [empty first] raise: #user_error
+    self should: [empty removeLast] raise: #user_error
+
+  // === reversed ===
+  testReversed =>
+    d := Deque withAll: #(1, 2, 3)
+    r := d reversed
+    self assert: r class equals: Deque
+    self assert: r asList equals: #(3, 2, 1)
+    self assert: r first equals: 3
+    self assert: r last equals: 1
+    self assert: r size equals: 3
+    // Original unchanged
+    self assert: d asList equals: #(1, 2, 3)
+
+  testReversedEmpty => self assert: Deque new reversed isEmpty
+
+  testReversedTwiceIsIdentity =>
+    d := Deque withAll: #(1, 2, 3, 4)
+    self assert: d reversed reversed asList equals: #(1, 2, 3, 4)
+
+  testReversedThenRemove =>
+    d := (Deque withAll: #(1, 2, 3)) reversed
+    r := d removeFirst
+    self assert: (r at: 1) equals: 3
+    self assert: (r at: 2) asList equals: #(2, 1)
+
+  // === Conversions and iteration ===
+  testAsList =>
+    self assert: (Deque withAll: #(1, 2, 3)) asList equals: #(1, 2, 3)
+    self assert: Deque new asList equals: #()
+
+  testDo =>
+    d := Deque withAll: #(1, 2, 3)
+    sum := d inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 6
+
+  testDoOrderIsFrontToBack =>
+    d := ((Deque withAll: #(2, 3)) addFirst: 1) addLast: 4
+    seen := d inject: #() into: [:acc :x | acc addFirst: x]
+    self assert: seen reversed equals: #(1, 2, 3, 4)
+
+  testPrintString =>
+    self assert: Deque new printString equals: "Deque"
+    self assert: (Deque withAll: #(1, 2)) printString equals: "Deque"
+
+  // === Inherited Collection protocol ===
+  testInheritedIncludes =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: (d includes: 2)
+    self assert: (d includes: 3)
+    self deny: (d includes: 9)
+
+  testInheritedCollect =>
+    d := Deque withAll: #(1, 2, 3)
+    doubled := d collect: [:x | x * 2]
+    self assert: doubled class equals: Deque
+    self assert: doubled asList equals: #(2, 4, 6)
+    self assert: doubled size equals: 3
+
+  testInheritedSelect =>
+    d := Deque withAll: #(1, 2, 3, 4)
+    big := d select: [:x | x > 2]
+    self assert: big class equals: Deque
+    self assert: big asList equals: #(3, 4)
+
+  testInheritedReject =>
+    d := Deque withAll: #(1, 2, 3, 4)
+    small := d reject: [:x | x > 2]
+    self assert: small class equals: Deque
+    self assert: small asList equals: #(1, 2)
+
+  testInheritedDetect =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: (d detect: [:x | x > 1]) equals: 2
+    self assert: (d detect: [:x | x > 9] ifNone: [0]) equals: 0
+
+  testInheritedIsNotEmpty =>
+    self assert: (Deque withAll: #(1)) isNotEmpty
+    self deny: Deque new isNotEmpty
+
+  testInheritedCount =>
+    d := Deque withAll: #(1, 2, 3, 4)
+    self assert: (d count: [:x | x isEven]) equals: 2
+
+  testInheritedSum => self assert: (Deque withAll: #(1, 2, 3)) sum equals: 6
+
+  testInheritedAnyAllSatisfy =>
+    d := Deque withAll: #(2, 4, 6)
+    self assert: (d allSatisfy: [:x | x isEven])
+    self assert: (d anySatisfy: [:x | x > 5])
+    self deny: (d anySatisfy: [:x | x > 9])
+
+  testInheritedAsSetAndAsArray =>
+    d := Deque withAll: #(1, 2, 2, 3)
+    self assert: d asSet size equals: 3
+    self assert: d asArray size equals: 4
+
+  // === Helpers ===
+
+  // Repeatedly `removeFirst` until empty, answering the elements in the order
+  // they came out.
+  drainFront: deque :: Deque -> List =>
+    deque isEmpty
+      ifTrue: [#()]
+      ifFalse: [
+        result := deque removeFirst
+        (self drainFront: (result at: 2)) addFirst: (result at: 1)
+      ]
+
+  // Repeatedly `removeLast` until empty, answering the elements in the order
+  // they came out.
+  drainRear: deque :: Deque -> List =>
+    deque isEmpty
+      ifTrue: [#()]
+      ifFalse: [
+        result := deque removeLast
+        (self drainRear: (result at: 2)) addFirst: (result at: 1)
+      ]
+
+  // The size of the deque before each `removeFirst`, front to back.
+  drainFrontSizes: deque :: Deque -> List =>
+    deque isEmpty ifTrue: [
+      #()
+    ] ifFalse: [
+      (self drainFrontSizes: ((deque removeFirst) at: 2)) addFirst: deque size
+    ]

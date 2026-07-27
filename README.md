@@ -16,22 +16,27 @@ discovery). It dogfoods the package system introduced by ADR 0070 (namespaces) a
 
 ## Status
 
-This repo currently holds only scaffolding — CI, docs, and project layout. No data structures have
-landed yet; `src/` and `test/` are intentionally empty. The first structure
-(`collections@Deque`, a banker's deque) lands in [BT-3011](https://linear.app/beamtalk/issue/BT-3011),
-along with the library's first `beamtalk publish` and its registry entry.
+The first structure, `collections@Deque` (a banker's deque), landed in
+[BT-3011](https://linear.app/beamtalk/issue/BT-3011). Nothing has been published to the registry yet, so
+depend on this repo as a git dependency for now (see
+[Adding this as a dependency](#adding-this-as-a-dependency)).
+
+| Structure | Status |
+|---|---|
+| [`Deque`](#deque) | Shipped |
+| `Heap`, `SortedMap`, `Zipper`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
 
 ## Usage
 
 Everything this library exports is reached through its qualified package name, `collections`, using the
-`package@Class` syntax (ADR 0070 §4). For example, once `collections@Deque` exists:
+`package@Class` syntax (ADR 0070 §4):
 
 ```beamtalk
 Object subclass: MyApp
   run =>
     queue := collections@Deque new.
-    queue := queue pushFront: 1.
-    queue := queue pushBack: 2.
+    queue := queue addFirst: 1.
+    queue := queue addLast: 2.
     queue first
 ```
 
@@ -39,6 +44,63 @@ Qualifying with `collections@` is required whenever the plain class name would c
 dependency's export, and is always accepted even when it wouldn't be ambiguous — see
 [Qualified Names](https://github.com/jamesc/beamtalk/blob/main/docs/beamtalk-packages.md#qualified-names-packageclass)
 in the main repo's docs for the full rules.
+
+## Deque
+
+`Deque` is a persistent (immutable) double-ended queue with amortised O(1) add and remove at *both*
+ends. Every operation returns a new `Deque` — the receiver is never modified.
+
+It is implemented as a **banker's deque**: elements live in two Lists, `front` in logical order and
+`rear` in reverse logical order, so the logical sequence is always `front ++ rear reversed`. Adding
+conses onto the head of the matching List, and removing takes the head of the matching List — both O(1).
+When one List runs empty while the other still holds two or more elements, the deque rebalances by
+splitting all elements evenly across the two Lists. That split is O(n), but it can only occur after at
+least n/2 O(1) removals since the previous split, which is what makes both ends amortised O(1).
+
+Unlike core `Queue`, whose `size` is O(n), `Deque` tracks its element count in state, so `size` is O(1).
+`reversed` is also O(1) — it just swaps the two Lists.
+
+### API
+
+| Message | Returns | Cost | Notes |
+|---|---|---|---|
+| `Deque new` | `Deque` | O(1) | Empty deque |
+| `Deque withAll: aList` | `Deque` | O(n) | Elements in order |
+| `addFirst: element` | `Deque` | O(1) amortised | New deque with `element` at the front |
+| `addLast: element` | `Deque` | O(1) amortised | New deque with `element` at the back |
+| `removeFirst` | `Tuple` | O(1) amortised | `{element, deque}` — raises when empty |
+| `removeLast` | `Tuple` | O(1) amortised | `{element, deque}` — raises when empty |
+| `first` | element | O(1) | Raises when empty |
+| `last` | element | O(1) | Raises when empty |
+| `size` | `Integer` | O(1) | Count tracked in state |
+| `isEmpty` | `Boolean` | O(1) | |
+| `do: aBlock` | `Nil` | O(n) | Iterates front to back |
+| `asList` | `List` | O(n) | Front to back |
+| `reversed` | `Deque` | O(1) | Swaps the two Lists |
+
+`removeFirst`/`removeLast` answer a `{element, deque}` `Tuple`, matching the shape of core
+`Queue>>dequeue`; read the parts with `at: 1` and `at: 2`. Accessing or removing from an empty end
+raises a structured `#beamtalk_error` (a `#user_error`) rather than answering `nil` — check `isEmpty`
+first.
+
+`Deque` is a `Collection` subclass, so the whole inherited `Collection` protocol works too:
+`collect:`, `select:`, `reject:`, `detect:`, `includes:`, `inject:into:`, `count:`, `sum`, `asSet`,
+`asArray`, and friends. `collect:`/`select:`/`reject:` answer a `Deque` (species pattern).
+
+```beamtalk
+d := collections@Deque withAll: #(2, 3)
+d := d addFirst: 1
+d := d addLast: 4
+d asList                       // => #(1, 2, 3, 4)
+d size                         // => 4
+
+result := d removeFirst
+result at: 1                   // => 1
+(result at: 2) asList          // => #(2, 3, 4)
+
+d reversed asList              // => #(4, 3, 2, 1)
+(d collect: [:x | x * 2]) asList  // => #(2, 4, 6, 8)
+```
 
 ## Adding this as a dependency
 
