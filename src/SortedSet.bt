@@ -101,11 +101,24 @@ typed Collection(E) subclass: SortedSet(E)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SortedSet new comparatorBlock value: 1 value: 2   // => true
+  /// SortedSet new comparator value: 1 value: 2   // => true
   /// ```
   @expect type
-  comparatorBlock -> Block(E, E, Boolean) =>
+  comparator -> Block(E, E, Boolean) =>
     self.comparator isNil ifTrue: [[:a :b | a <= b]] ifFalse: [self.comparator]
+
+  /// This set's ordering *identity* — `nil` for the default order, otherwise
+  /// the comparator block itself. Named to match `PriorityQueue>>ordering`.
+  ///
+  /// Distinct from `comparator`, which resolves `nil` to a usable block: two
+  /// separately built default-ordered sets must compare equal here, and two
+  /// freshly resolved default blocks would not.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new ordering   // => nil
+  /// ```
+  ordering -> Object => self.comparator
 
   /// The backing tree, resolving the stored `nil` placeholder to the empty
   /// tree sentinel.
@@ -117,8 +130,10 @@ typed Collection(E) subclass: SortedSet(E)
     SortedSet new: #{#root => newRoot, #comparator => self.comparator}
 
   /// Raise unless `other` is ordered by the same comparator as the receiver.
+  ///
+  /// Compares ordering *identity*, not the resolved blocks — see `ordering`.
   internal assertSameOrderingAs: other :: SortedSet(E) -> Boolean =>
-    (self.comparator =:= other comparator)
+    (self ordering =:= other ordering)
       ifTrue: [true]
       ifFalse: [
         self error: "SortedSet: comparator mismatch — both sets must be ordered by the same comparator block"
@@ -154,7 +169,7 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet withAll: #(1, 2)) includes: 9   // => false
   /// ```
   includes: element :: E -> Boolean =>
-    self tree containsKey: element using: self comparatorBlock
+    self tree containsKey: element using: self comparator
 
   /// Set with `element` added; unchanged when an equal element is present.
   ///
@@ -168,7 +183,7 @@ typed Collection(E) subclass: SortedSet(E)
       withRoot: (self tree
         insert: element
         val: true
-        using: self comparatorBlock)
+        using: self comparator)
 
   /// Set with `element` removed; unchanged when it is absent.
   ///
@@ -178,7 +193,7 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet new remove: 1) isEmpty            // => true
   /// ```
   remove: element :: E -> SortedSet(E) =>
-    self withRoot: (self tree delete: element using: self comparatorBlock)
+    self withRoot: (self tree delete: element using: self comparator)
 
   // === Ordered traversal ===
 
@@ -230,6 +245,51 @@ typed Collection(E) subclass: SortedSet(E)
   /// ```
   last -> E => self max
 
+  /// Smallest element, or `emptyBlock`'s value when the set is empty.
+  ///
+  /// The non-raising counterpart of `min`, mirroring `at:ifAbsent:` and
+  /// `Deque>>firstIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) minIfEmpty: [0]   // => 1
+  /// SortedSet new minIfEmpty: [0]                  // => 0
+  /// ```
+  minIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode key
+
+  /// Largest element, or `emptyBlock`'s value when the set is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) maxIfEmpty: [0]   // => 3
+  /// SortedSet new maxIfEmpty: [0]                  // => 0
+  /// ```
+  maxIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode key
+
+  /// Smallest element, or `emptyBlock`'s value when empty. Alias of
+  /// `minIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new firstIfEmpty: [#none]   // => #none
+  /// ```
+  firstIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self minIfEmpty: emptyBlock
+
+  /// Largest element, or `emptyBlock`'s value when empty. Alias of
+  /// `maxIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new lastIfEmpty: [#none]   // => #none
+  /// ```
+  lastIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self maxIfEmpty: emptyBlock
+
   // === Nearest neighbours ===
 
   /// Greatest element that sorts at or before `element`. Raises an error when
@@ -255,7 +315,7 @@ typed Collection(E) subclass: SortedSet(E)
   floor: element :: E ifAbsent: absentBlock :: Block(Object) -> E | Object =>
     found := self tree
       floorNodeFor: element
-      using: self comparatorBlock
+      using: self comparator
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
@@ -282,7 +342,7 @@ typed Collection(E) subclass: SortedSet(E)
   ceiling: element :: E ifAbsent: absentBlock :: Block(Object) -> E | Object =>
     found := self tree
       ceilingNodeFor: element
-      using: self comparatorBlock
+      using: self comparator
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
@@ -300,7 +360,7 @@ typed Collection(E) subclass: SortedSet(E)
     self tree
       foldRangeFrom: low
       to: high
-      using: self comparatorBlock
+      using: self comparator
       acc: empty
       block: [:acc :k :_v | acc add: k]
 
@@ -315,7 +375,7 @@ typed Collection(E) subclass: SortedSet(E)
     self tree
       foldRangeFrom: low
       to: high
-      using: self comparatorBlock
+      using: self comparator
       acc: nil
       block: [:_acc :k :_v | block value: k]
     nil

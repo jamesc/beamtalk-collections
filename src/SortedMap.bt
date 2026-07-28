@@ -123,11 +123,24 @@ typed Collection(V) subclass: SortedMap(K, V)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SortedMap new comparatorBlock value: 1 value: 2   // => true
+  /// SortedMap new comparator value: 1 value: 2   // => true
   /// ```
   @expect type
-  comparatorBlock -> Block(K, K, Boolean) =>
+  comparator -> Block(K, K, Boolean) =>
     self.comparator isNil ifTrue: [[:a :b | a <= b]] ifFalse: [self.comparator]
+
+  /// This map's ordering *identity* — `nil` for the default order, otherwise
+  /// the comparator block itself. Named to match `PriorityQueue>>ordering`.
+  ///
+  /// Distinct from `comparator`, which resolves `nil` to a usable block: two
+  /// separately built default-ordered maps must compare equal here, and two
+  /// freshly resolved default blocks would not.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new ordering   // => nil
+  /// ```
+  ordering -> Object => self.comparator
 
   /// The backing tree, resolving the stored `nil` placeholder to the empty
   /// tree sentinel.
@@ -139,8 +152,10 @@ typed Collection(V) subclass: SortedMap(K, V)
     SortedMap new: #{#root => newRoot, #comparator => self.comparator}
 
   /// Raise unless `other` is ordered by the same comparator as the receiver.
+  ///
+  /// Compares ordering *identity*, not the resolved blocks — see `ordering`.
   internal assertSameOrderingAs: other :: SortedMap(K, V) -> Boolean =>
-    (self.comparator =:= other comparator)
+    (self ordering =:= other ordering)
       ifTrue: [true]
       ifFalse: [
         self error: "SortedMap: comparator mismatch — both maps must be ordered by the same comparator block"
@@ -186,7 +201,7 @@ typed Collection(V) subclass: SortedMap(K, V)
   at: key :: K ifAbsent: absentBlock :: Block(Object) -> V | Object =>
     self tree
       at: key
-      using: self comparatorBlock
+      using: self comparator
       ifAbsent: absentBlock
 
   /// Test whether `key` is present, comparing with the map's comparator.
@@ -197,7 +212,7 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// SortedMap new includesKey: 1                    // => false
   /// ```
   includesKey: key :: K -> Boolean =>
-    self tree containsKey: key using: self comparatorBlock
+    self tree containsKey: key using: self comparator
 
   // === Update ===
 
@@ -212,7 +227,7 @@ typed Collection(V) subclass: SortedMap(K, V)
       withRoot: (self tree
         insert: key
         val: value
-        using: self comparatorBlock)
+        using: self comparator)
 
   /// Map with `key` removed; unchanged when the key is absent.
   ///
@@ -222,7 +237,7 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap new removeKey: 1) isEmpty                    // => true
   /// ```
   removeKey: key :: K -> SortedMap(K, V) =>
-    self withRoot: (self tree delete: key using: self comparatorBlock)
+    self withRoot: (self tree delete: key using: self comparator)
 
   // === Ordered traversal ===
 
@@ -367,6 +382,52 @@ typed Collection(V) subclass: SortedMap(K, V)
     self isEmpty ifTrue: [self error: "SortedMap last: map is empty"]
     self tree maxNode val
 
+  /// Smallest key, or `emptyBlock`'s value when the map is empty.
+  ///
+  /// The non-raising counterpart of `min`, mirroring `at:ifAbsent:` and
+  /// `Deque>>firstIfEmpty:`. Note `min`/`max` answer *keys* while
+  /// `first`/`last` answer *values*; their `IfEmpty:` forms keep that split.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) minIfEmpty: [0]   // => 1
+  /// SortedMap new minIfEmpty: [0]                                  // => 0
+  /// ```
+  minIfEmpty: emptyBlock :: Block(Object) -> K | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode key
+
+  /// Largest key, or `emptyBlock`'s value when the map is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) maxIfEmpty: [0]   // => 2
+  /// SortedMap new maxIfEmpty: [0]                                  // => 0
+  /// ```
+  maxIfEmpty: emptyBlock :: Block(Object) -> K | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode key
+
+  /// Value under the smallest key, or `emptyBlock`'s value when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new firstIfEmpty: [#none]   // => #none
+  /// ```
+  firstIfEmpty: emptyBlock :: Block(Object) -> V | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode val
+
+  /// Value under the largest key, or `emptyBlock`'s value when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new lastIfEmpty: [#none]   // => #none
+  /// ```
+  lastIfEmpty: emptyBlock :: Block(Object) -> V | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode val
+
   // === Nearest neighbours ===
 
   /// Greatest key that sorts at or before `key`. Raises an error when every
@@ -392,7 +453,7 @@ typed Collection(V) subclass: SortedMap(K, V)
   floor: key :: K ifAbsent: absentBlock :: Block(Object) -> K | Object =>
     found := self tree
       floorNodeFor: key
-      using: self comparatorBlock
+      using: self comparator
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
@@ -419,7 +480,7 @@ typed Collection(V) subclass: SortedMap(K, V)
   ceiling: key :: K ifAbsent: absentBlock :: Block(Object) -> K | Object =>
     found := self tree
       ceilingNodeFor: key
-      using: self comparatorBlock
+      using: self comparator
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
@@ -438,7 +499,7 @@ typed Collection(V) subclass: SortedMap(K, V)
     self tree
       foldRangeFrom: low
       to: high
-      using: self comparatorBlock
+      using: self comparator
       acc: empty
       block: [:acc :k :v | acc at: k put: v]
 
@@ -453,7 +514,7 @@ typed Collection(V) subclass: SortedMap(K, V)
     self tree
       foldRangeFrom: low
       to: high
-      using: self comparatorBlock
+      using: self comparator
       acc: nil
       block: [:_acc :k :v | block value: k value: v]
     nil

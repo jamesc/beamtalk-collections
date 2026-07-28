@@ -367,3 +367,28 @@ TestCase subclass: SortedSetTest
       i isOdd
     ]) asList
     self assert: (pruned root depth < 20) equals: true
+
+  // === Non-raising empty accessors ===
+  testMinMaxIfEmptyOnPopulatedSetIgnoresBlock =>
+    s := SortedSet withAll: #(3, 1, 5)
+    self assert: (s minIfEmpty: [0]) equals: 1
+    self assert: (s maxIfEmpty: [0]) equals: 5
+    self assert: (s firstIfEmpty: [0]) equals: 1
+    self assert: (s lastIfEmpty: [0]) equals: 5
+
+  testMinMaxIfEmptyOnEmptySetTakesBlock =>
+    s := SortedSet new
+    self assert: (s minIfEmpty: [0]) equals: 0
+    self assert: (s maxIfEmpty: [#none]) equals: #none
+    self assert: (s firstIfEmpty: [nil]) equals: nil
+    self assert: (s lastIfEmpty: [#gone]) equals: #gone
+
+  testIfEmptyRespectsCustomOrdering =>
+    s := SortedSet sortedBy: [:a :b | a >= b] withAll: #(3, 1, 5)
+    self assert: (s minIfEmpty: [0]) equals: 5
+    self assert: (s maxIfEmpty: [0]) equals: 1
+
+  testOrderingIdentityAccessor =>
+    self assert: SortedSet new ordering equals: nil
+    blk := [:a :b | a >= b]
+    self assert: ((SortedSet sortedBy: blk) ordering =:= blk) equals: true

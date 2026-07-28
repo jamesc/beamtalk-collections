@@ -408,3 +408,23 @@ TestCase subclass: SortedMapTest
     self assert: (pruned root depth < 20) equals: true
     self assert: pruned min equals: 1
     self assert: pruned max equals: 299
+
+  // === Non-raising empty accessors ===
+  testMinMaxIfEmptyOnPopulatedMapIgnoresBlock =>
+    m := (SortedMap new at: 2 put: "b") at: 1 put: "a"
+    self assert: (m minIfEmpty: [0]) equals: 1
+    self assert: (m maxIfEmpty: [0]) equals: 2
+    self assert: (m firstIfEmpty: [""]) equals: "a"
+    self assert: (m lastIfEmpty: [""]) equals: "b"
+
+  testMinMaxIfEmptyOnEmptyMapTakesBlock =>
+    m := SortedMap new
+    self assert: (m minIfEmpty: [0]) equals: 0
+    self assert: (m maxIfEmpty: [#none]) equals: #none
+    self assert: (m firstIfEmpty: [nil]) equals: nil
+    self assert: (m lastIfEmpty: [#gone]) equals: #gone
+
+  testOrderingIdentityAccessor =>
+    self assert: SortedMap new ordering equals: nil
+    blk := [:a :b | a >= b]
+    self assert: ((SortedMap sortedBy: blk) ordering =:= blk) equals: true
