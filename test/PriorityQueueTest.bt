@@ -173,6 +173,20 @@ TestCase subclass: PriorityQueueTest
     b := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #beta) add: 2
     self should: [a merge: b] raise: #user_error
 
+  // `#natural` is the default queue's token. Allowing it as an explicit label
+  // would collide with that default, so `merge:` would accept a foreign
+  // comparator and splice its subtree in whole — `peek` still answers
+  // correctly while a full drain comes out unsorted. Rejected at construction.
+  testNaturalIsReservedAsALabel =>
+    self should: [
+      PriorityQueue sortedBy: [:x :y | x >= y] labelled: #natural
+    ] raise: #user_error
+
+  testOtherSymbolsAreStillUsableAsLabels =>
+    a := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #natural2) add: 1
+    b := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #natural2) add: 9
+    self assert: (a merge: b) peek equals: 9
+
   // === Empty-queue behaviour ===
   testPeekOnEmptyRaises =>
     self should: [PriorityQueue new peek] raise: #user_error

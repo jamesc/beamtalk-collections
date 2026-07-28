@@ -116,6 +116,13 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// do impose the same order — a mismatched pair produces a queue whose
   /// `peek` is not the minimum.
   ///
+  /// `#natural` is **reserved** for the default ordering that `new` and
+  /// `withAll:` use, and is rejected here. Without that guard, labelling a
+  /// custom comparator `#natural` would collide with the default token, so
+  /// `merge:` would accept the pair and splice a foreign-ordered subtree in
+  /// whole — `peek` still answers correctly while a full drain comes out
+  /// unsorted.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// a := PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending
@@ -123,6 +130,10 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// ((a add: 1) merge: (b add: 9)) peek     // => 9
   /// ```
   class sortedBy: comparator :: Block(E, E, Boolean) labelled: label :: Object -> PriorityQueue(E) =>
+    label =:= #natural
+      ifTrue: [
+        self error: "PriorityQueue sortedBy:labelled: — #natural is reserved for the default ordering; choose another label"
+      ]
     PriorityQueue new: #{
       #root => nil,
       #count => 0,
