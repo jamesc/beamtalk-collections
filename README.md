@@ -54,6 +54,10 @@ comparator block itself, and `sortedBy:labelled:` uses a label you supply. Block
 two separately written literals never match even when they read the same — use `sortedBy:labelled:` to
 declare independently built comparators equivalent.
 
+`#natural` is reserved for the default ordering and is rejected as an explicit label. Allowing it would
+collide with the token `new` and `withAll:` assign, so `merge:` would accept a foreign comparator and
+splice its subtree in whole — `peek` would still answer correctly while a full drain came out unsorted.
+
 ```beamtalk
 a := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
 b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.

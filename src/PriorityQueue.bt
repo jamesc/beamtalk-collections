@@ -154,6 +154,19 @@ typed Collection(E) subclass: PriorityQueue(E)
   class withAll: list :: List(E) -> PriorityQueue(E) =>
     list inject: PriorityQueue new into: [:heap :elem | heap add: elem]
 
+  /// Create a queue ordered by `comparator` holding every element of `list`.
+  ///
+  /// The one-call form of `sortedBy:` followed by `addAll:`, matching
+  /// `SortedMap`/`SortedSet sortedBy:withAll:`. O(n).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue sortedBy: [:a :b | a >= b] withAll: #(3, 1, 2)) peek  // => 3
+  /// (PriorityQueue sortedBy: [:a :b | a >= b] withAll: #(3, 1, 2)) size  // => 3
+  /// ```
+  class sortedBy: comparator :: Block(E, E, Boolean) withAll: list :: List(E) -> PriorityQueue(E) =>
+    (PriorityQueue sortedBy: comparator) addAll: list
+
   // === Accessors ===
 
   /// Number of elements. O(1) — the count is carried in the queue's state.
