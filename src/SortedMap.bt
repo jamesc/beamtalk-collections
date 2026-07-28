@@ -24,8 +24,15 @@
 /// ordering and raise an error otherwise. Sameness is block identity: every
 /// map built with `new` / `withAll:` shares the default ordering and combines
 /// freely, while a map built with `sortedBy:` only combines with maps built
-/// from *that same block value*. Hold the block in a variable and pass it to
-/// each `sortedBy:` if you need several interoperable maps.
+/// from *that same block value*.
+///
+/// The known limitation of that rule: two separately written but textually
+/// identical block literals are different values, so
+/// `SortedMap sortedBy: [:a :b | a >= b]` written twice yields two maps that
+/// refuse to merge. Bind the comparator to a variable and pass that same
+/// variable to each `sortedBy:` when several interoperable maps are needed.
+/// Erring towards refusing a legitimate merge is deliberate — the alternative
+/// is silently producing a mis-ordered map.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -274,6 +281,29 @@ typed Collection(V) subclass: SortedMap(K, V)
     self keys inject: (self withRoot: nil) into: [:acc :k |
       acc at: k put: (block value: (source at: k))
     ]
+
+  /// Select the bindings whose *value* satisfies `block`, keeping the keys and
+  /// the receiver's ordering.
+  ///
+  /// Overrides `Collection>>select:`, which rebuilds through
+  /// `self species withAll:` — a class-side constructor that cannot see this
+  /// map's `comparator` field, so a custom-ordered map would silently come
+  /// back in natural order. `Collection>>reject:` is pure delegation to
+  /// `select:`, so it inherits the fix and needs no override of its own.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #(#(1, 10), #(2, 20))) select: [:v | v > 15]) keys   // => #(2)
+  /// ((SortedMap withAll: #(#(1, 10), #(2, 20))) reject: [:v | v > 15]) keys   // => #(1)
+  /// ```
+  select: block :: Block(V, Boolean) -> SortedMap(K, V) =>
+    source := self
+    self keys
+      inject: (self withRoot: nil)
+      into: [:acc :k |
+        bound := source at: k
+        (block value: bound) ifTrue: [acc at: k put: bound] ifFalse: [acc]
+      ]
 
   /// Map holding every binding of the receiver overlaid with those of
   /// `other` — `other`'s value wins where both hold the same key, matching

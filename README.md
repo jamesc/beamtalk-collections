@@ -37,7 +37,8 @@ m floor: 2                        // => 1
 | Construction | `new`, `sortedBy:`, `withAll:`, `sortedBy:withAll:` |
 | Lookup | `at:`, `at:ifAbsent:`, `includesKey:`, `size`, `isEmpty` |
 | Update | `at:put:`, `removeKey:`, `merge:` |
-| Ordered traversal | `do:`, `keysAndValuesDo:`, `keys`, `values`, `collect:` |
+| Ordered traversal | `do:`, `keysAndValuesDo:`, `keys`, `values` |
+| Derived maps | `collect:`, `select:`, `reject:` |
 | Ends | `min`, `max`, `first`, `last` |
 | Nearest neighbours | `floor:`, `floor:ifAbsent:`, `ceiling:`, `ceiling:ifAbsent:` |
 | Range scans | `from:to:`, `from:to:do:` |
@@ -65,6 +66,7 @@ s union: (collections@SortedSet withAll: #(2))
 | Construction | `new`, `sortedBy:`, `withAll:`, `sortedBy:withAll:` |
 | Membership | `add:`, `remove:`, `includes:`, `size`, `isEmpty` |
 | Ordered traversal | `do:`, `asList` |
+| Derived sets | `collect:`, `select:`, `reject:` |
 | Ends | `min`, `max`, `first`, `last` |
 | Nearest neighbours | `floor:`, `floor:ifAbsent:`, `ceiling:`, `ceiling:ifAbsent:` |
 | Range scans | `from:to:`, `from:to:do:` |
@@ -92,6 +94,14 @@ ordering could only produce a mis-ordered result, so `SortedMap>>merge:` and `So
 identity*: everything built with `new` or `withAll:` shares the default ordering and combines freely,
 while anything built with `sortedBy:` combines only with structures built from that same block value.
 Bind the block to a variable and reuse it when several interoperable collections are needed.
+
+`collect:`, `select:` and `reject:` are overridden on both classes so their results keep the receiver's
+comparator. The inherited `Collection` versions rebuild through `self species withAll:` — a class-side
+constructor that cannot see the receiver's `comparator` field — so a custom-ordered structure would
+otherwise come back silently reordered. `reject:` is pure delegation to `select:` in `Collection`, so
+overriding `select:` fixes it too. On `SortedSet>>collect:` the comparator is preserved even though the
+block maps `E -> R`: the caller chose that ordering, and failing loudly on an incompatible element beats
+quietly reverting to natural order.
 
 Range scans are inclusive of both bounds, and neither bound has to be present in the collection.
 `min`, `max`, `first`, `last` and the `ifAbsent:`-less `at:`, `floor:` and `ceiling:` raise a

@@ -27,9 +27,15 @@
 /// with the same comparator and raise an error otherwise. Sameness is block
 /// identity: every set built with `new` / `withAll:` shares the default
 /// ordering and combines freely, while a set built with `sortedBy:` only
-/// combines with sets built from *that same block value*. Hold the block in a
-/// variable and pass it to each `sortedBy:` if you need several interoperable
-/// sets.
+/// combines with sets built from *that same block value*.
+///
+/// The known limitation of that rule: two separately written but textually
+/// identical block literals are different values, so
+/// `SortedSet sortedBy: [:a :b | a >= b]` written twice yields two sets that
+/// refuse to combine. Bind the comparator to a variable and pass that same
+/// variable to each `sortedBy:` when several interoperable sets are needed.
+/// Erring towards refusing a legitimate union is deliberate — the alternative
+/// is silently producing a mis-ordered set.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -357,6 +363,51 @@ typed Collection(E) subclass: SortedSet(E)
     self assertSameOrderingAs: other
     self inject: (self withRoot: nil) into: [:acc :each |
       (other includes: each) ifTrue: [acc] ifFalse: [acc add: each]
+    ]
+
+  // === Derived collections ===
+
+  /// Map `block` over every element, returning a `SortedSet` that keeps the
+  /// receiver's ordering.
+  ///
+  /// Overrides `Collection>>collect:`, which rebuilds through
+  /// `self species withAll:` — a class-side constructor that cannot see this
+  /// set's `comparator` field, so a custom-ordered set would silently come
+  /// back in natural order.
+  ///
+  /// The comparator is preserved even though `block` maps `E -> R` and an
+  /// ordering written against `E` need not be meaningful for `R`. That is
+  /// deliberate: the caller explicitly chose this ordering, and failing
+  /// loudly on an incompatible element beats quietly reverting to natural
+  /// order. Pair `collect:` with `SortedSet sortedBy:withAll:` when the
+  /// result needs a different ordering.
+  ///
+  /// Note that `block` may map two distinct elements onto the same result, so
+  /// the result can be smaller than the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2)) collect: [:e | e * 10]) asList   // => #(10, 20)
+  /// ```
+  collect: block :: Block(E, R) -> SortedSet(R) =>
+    empty := self withRoot: nil
+    self inject: empty into: [:acc :each | acc add: (block value: each)]
+
+  /// Select the elements satisfying `block`, keeping the receiver's ordering.
+  ///
+  /// Overridden for the same reason as `collect:`. `Collection>>reject:` is
+  /// pure delegation to `select:`, so it inherits the fix and needs no
+  /// override of its own.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2, 3)) select: [:e | e > 1]) asList   // => #(2, 3)
+  /// ((SortedSet withAll: #(1, 2, 3)) reject: [:e | e > 1]) asList   // => #(1)
+  /// ```
+  select: block :: Block(E, Boolean) -> SortedSet(E) =>
+    empty := self withRoot: nil
+    self inject: empty into: [:acc :each |
+      (block value: each) ifTrue: [acc add: each] ifFalse: [acc]
     ]
 
   // === Conversions ===
