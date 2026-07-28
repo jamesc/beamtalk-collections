@@ -67,12 +67,11 @@ b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
 `includes:`, …) — walks the heap, not a sorted sequence. Only the minimum is guaranteed to come first.
 Use `asSortedList` (O(n log n), a repeated `removeMin` drain) when you want ordered output.
 
-**Rebuilding operations keep your ordering.** `collect:`, `select:`, `reject:`, and the
-`parallelCollect:` pair all answer a queue that carries the receiver's comparator *and* its ordering
-token, so a max-heap stays a max-heap and the result can still be merged with the queue it came from.
-These are overridden here rather than inherited: `Collection` rebuilds via `self species withAll:`, and
-`species` answers a *class*, which cannot carry per-queue state — the inherited versions would silently
-hand back a `#natural` min-heap.
+**Rebuilding operations keep your ordering.** `collect:`, `select:`, and `reject:` all answer a queue
+that carries the receiver's comparator *and* its ordering token, so a max-heap stays a max-heap and the
+result can still be merged with the queue it came from. These are overridden here rather than inherited:
+`Collection` rebuilds via `self species withAll:`, and `species` answers a *class*, which cannot carry
+per-queue state — the inherited versions would silently hand back a `#natural` min-heap.
 
 ```beamtalk
 maxHeap := (collections@PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5).

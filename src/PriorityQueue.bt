@@ -306,10 +306,10 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// `asList`, `detect:`, …) inherits that same lack of order. Use
   /// `asSortedList` when order matters.
   ///
-  /// The methods that answer a *new queue* — `collect:`, `select:`,
-  /// `reject:`, and the `parallelCollect:` pair — are overridden here so the
-  /// result keeps this queue's comparator and ordering token. They do not go
-  /// through `species`, whose class-only result cannot carry that state.
+  /// The methods that answer a *new queue* — `collect:`, `select:`, and
+  /// `reject:` — are overridden here so the result keeps this queue's
+  /// comparator and ordering token. They do not go through `species`, whose
+  /// class-only result cannot carry that state.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -359,40 +359,6 @@ typed Collection(E) subclass: PriorityQueue(E)
   select: block :: Block(E, Boolean) -> PriorityQueue(E) =>
     self inject: self emptyLike into: [:heap :each |
       (block value: each) ifTrue: [heap add: each] ifFalse: [heap]
-    ]
-
-  /// Like `collect:`, but evaluates `block` for every element concurrently.
-  ///
-  /// Delegates the concurrency to `List>>parallelCollect:` — inherited from
-  /// `Collection`, so the spawning, failure, and ordering behaviour documented
-  /// there all apply unchanged — then rebuilds the queue with this one's
-  /// comparator and ordering token rather than via `species`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
-  /// (maxHeap parallelCollect: [:x | x * 10]) asSortedList   // => #(30, 20, 10)
-  /// ```
-  parallelCollect: block :: Block(E, R) -> PriorityQueue(R) =>
-    (self asList parallelCollect: block) inject: self emptyLike into: [:heap :each |
-      heap add: each
-    ]
-
-  /// Like `parallelCollect:`, but bounds concurrency to `maxConcurrency`.
-  ///
-  /// Delegates to `List>>parallelCollect:maxConcurrency:` — inherited from
-  /// `Collection`, so the chunking, failure, and validation behaviour
-  /// documented there all apply unchanged — then rebuilds the queue with this
-  /// one's comparator and ordering token rather than via `species`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
-  /// (maxHeap parallelCollect: [:x | x * 10] maxConcurrency: 2) peek   // => 30
-  /// ```
-  parallelCollect: block :: Block(E, R) maxConcurrency: maxConcurrency :: Integer -> PriorityQueue(R) =>
-    (self asList parallelCollect: block maxConcurrency: maxConcurrency) inject: self emptyLike into: [:heap :each |
-      heap add: each
     ]
 
   /// Drain the whole queue into a sorted `List`. O(n log n).

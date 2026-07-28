@@ -301,18 +301,6 @@ TestCase subclass: PriorityQueueTest
     self assert: kept peek equals: 2
     self assert: kept asSortedList equals: #(2, 1)
 
-  testParallelCollectPreservesComparator =>
-    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
-    mapped := maxHeap parallelCollect: [:x | x * 10]
-    self assert: mapped peek equals: 30
-    self assert: mapped asSortedList equals: #(30, 20, 10)
-
-  testParallelCollectMaxConcurrencyPreservesComparator =>
-    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3, 4)
-    mapped := maxHeap parallelCollect: [:x | x * 10] maxConcurrency: 2
-    self assert: mapped peek equals: 40
-    self assert: mapped asSortedList equals: #(40, 30, 20, 10)
-
   testRebuildPreservesOrderingTokenNotJustTheBlock =>
     // The token, not only the comparator, must carry through — otherwise the
     // rebuilt queue could no longer be merged with the queue it came from.
@@ -321,9 +309,20 @@ TestCase subclass: PriorityQueueTest
     self assert: (maxHeap collect: [:x | x + 0]) ordering equals: byDescending
     self assert: (maxHeap select: [:x | x > 1]) ordering equals: byDescending
     self assert: (maxHeap reject: [:x | x > 1]) ordering equals: byDescending
-    self assert: (maxHeap parallelCollect: [:x |
-      x + 0
-    ]) ordering equals: byDescending
+    // Chained rebuilds must not lose it either.
+    chained := (maxHeap select: [:x | x > 1]) collect: [:x | x * 2]
+    self assert: chained ordering equals: byDescending
+    self assert: chained asSortedList equals: #(8, 4)
+
+  testExplicitLabelSurvivesRebuild =>
+    labelled := (PriorityQueue sortedBy: [:a :b |
+      a >= b
+    ] labelled: #desc) addAll: #(1, 4, 2)
+    self assert: (labelled collect: [:x | x + 0]) ordering equals: #desc
+    self assert: (labelled select: [:x | x > 1]) ordering equals: #desc
+    // A separately built queue sharing the label still merges with the rebuild.
+    other := (PriorityQueue sortedBy: [:x :y | x >= y] labelled: #desc) add: 9
+    self assert: ((labelled select: [:x | x > 1]) merge: other) peek equals: 9
 
   testRebuiltQueueStillMergesWithItsSource =>
     maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2)
