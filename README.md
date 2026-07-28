@@ -28,10 +28,16 @@ q peek                    // => 1
 q size                    // => 3
 q asSortedList            // => #(1, 3, 5)
 
-popped := q removeMin.    // {element, queue} Tuple, same shape as Queue>>dequeue
-popped at: 1              // => 1
-(popped at: 2) size       // => 2
+rest := q removeMin.      // just the remaining queue — no pair to unpack
+rest peek                 // => 3
+rest size                 // => 2
 ```
+
+`peek` and `removeMin` are deliberately separate: `peek` answers the minimum element, `removeMin` answers
+the queue without it. That follows the `List first` / `List rest` idiom used throughout the stdlib rather
+than returning an element-plus-remainder pair. Everything here is immutable, so there is no atomicity to
+preserve by fusing them, and neither half gets more expensive for being split — `peek` is O(1) and
+`removeMin` is O(log n) amortised either way.
 
 **Ordering.** A two-argument comparator block returning a Boolean, the same convention as `List>>sort:`
 — it answers "should `a` come out before `b`?". The default is `[:a :b | a <= b]`, a min-heap.
@@ -62,12 +68,23 @@ b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
 Use `asSortedList` (O(n log n), a repeated `removeMin` drain) when you want ordered output.
 
 **Empty queues.** `peek` and `removeMin` raise on an empty queue; `peekIfEmpty:` and `removeMinIfEmpty:`
-take a block and return its value instead.
+take a block and return its value instead. These raise rather than answering a `Result` on purpose:
+per [ADR 0060](https://github.com/jamesc/beamtalk/blob/main/docs/ADR/0060-result-type-hybrid-error-handling.md),
+`Result` is for environmental failures (I/O, parsing, network) while exceptions signal caller misuse, and
+asking an empty heap for its minimum is caller misuse.
 
 **No decrease-key.** There is deliberately no `decreaseKey:`, and no efficient one is possible in a
 persistent structure: there are no stable node handles to decrease, and finding an element costs O(n).
 For Dijkstra or A*, use the standard workaround — push a *duplicate* entry at the lower priority and
-discard stale entries as you pop them.
+discard stale entries as you pop them:
+
+```beamtalk
+entry := queue peek.
+queue := queue removeMin.
+(entry at: 1) =:= (best at: (entry at: 2))
+  ifTrue: [ "…entry is live, relax its neighbours…" ]
+  ifFalse: [ "…stale duplicate, skip it…" ]
+```
 
 Duplicate elements are fully supported: a `PriorityQueue` is a heap, not a set.
 

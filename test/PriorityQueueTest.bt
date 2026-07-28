@@ -38,10 +38,10 @@ TestCase subclass: PriorityQueueTest
 
   testRemoveMinDoesNotMutateReceiver =>
     original := PriorityQueue withAll: #(5, 3, 1)
-    popped := original removeMin
+    rest := original removeMin
     self assert: original size equals: 3
     self assert: original peek equals: 1
-    self assert: (popped at: 2) size equals: 2
+    self assert: rest size equals: 2
 
   // === Adding ===
   testAddAll =>
@@ -71,14 +71,14 @@ TestCase subclass: PriorityQueueTest
 
   testDrainStepByStepIsMonotonic =>
     q := PriorityQueue withAll: #(7, 2, 9, 1, 5)
-    first := q removeMin
-    second := (first at: 2) removeMin
-    third := (second at: 2) removeMin
-    self assert: (first at: 1) equals: 1
-    self assert: (second at: 1) equals: 2
-    self assert: (third at: 1) equals: 5
-    self assert: (third at: 2) size equals: 2
-    self assert: (third at: 2) asSortedList equals: #(7, 9)
+    afterFirst := q removeMin
+    afterSecond := afterFirst removeMin
+    afterThird := afterSecond removeMin
+    self assert: q peek equals: 1
+    self assert: afterFirst peek equals: 2
+    self assert: afterSecond peek equals: 5
+    self assert: afterThird size equals: 2
+    self assert: afterThird asSortedList equals: #(7, 9)
 
   // === Duplicates ===
   testDuplicatesAreAllRetained =>
@@ -88,10 +88,10 @@ TestCase subclass: PriorityQueueTest
 
   testDuplicatesPopIndividually =>
     q := PriorityQueue withAll: #(2, 2, 2)
-    popped := q removeMin
-    self assert: (popped at: 1) equals: 2
-    self assert: (popped at: 2) size equals: 2
-    self assert: (popped at: 2) asSortedList equals: #(2, 2)
+    rest := q removeMin
+    self assert: q peek equals: 2
+    self assert: rest size equals: 2
+    self assert: rest asSortedList equals: #(2, 2)
 
   testAllElementsIdenticalDrainsCleanly =>
     q := PriorityQueue withAll: #(7, 7, 7, 7)
@@ -105,7 +105,7 @@ TestCase subclass: PriorityQueueTest
 
   testComparatorSurvivesAddAndRemove =>
     q := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(5, 1, 9)
-    rest := (q removeMin) at: 2
+    rest := q removeMin
     self assert: rest peek equals: 5
     self assert: (rest add: 100) peek equals: 100
 
@@ -181,7 +181,7 @@ TestCase subclass: PriorityQueueTest
     self should: [PriorityQueue new removeMin] raise: #user_error
 
   testDrainedQueueRaisesAgain =>
-    drained := (PriorityQueue withAll: #(1)) removeMin at: 2
+    drained := (PriorityQueue withAll: #(1)) removeMin
     self assert: drained isEmpty equals: true
     self should: [drained peek] raise: #user_error
     self should: [drained removeMin] raise: #user_error
@@ -198,13 +198,14 @@ TestCase subclass: PriorityQueueTest
     self assert: (PriorityQueue new removeMinIfEmpty: [#none]) equals: #none
 
   testRemoveMinIfEmptyOnNonEmptyPops =>
-    // `removeMinIfEmpty:` is typed `Tuple | Object`, so `at:` needs the
-    // type-erasure escape hatch even though this branch always yields a Tuple.
-    popped := (PriorityQueue withAll: #(5, 1)) removeMinIfEmpty: [nil]
+    // `removeMinIfEmpty:` is typed `PriorityQueue(E) | Object`, so the queue
+    // sends need the type-erasure escape hatch even though this branch always
+    // yields a queue.
+    rest := (PriorityQueue withAll: #(5, 1)) removeMinIfEmpty: [nil]
     @expect type
-    self assert: (popped at: 1) equals: 1
+    self assert: rest size equals: 1
     @expect type
-    self assert: (popped at: 2) size equals: 1
+    self assert: rest peek equals: 5
 
   // === size tracking ===
   testSizeAcrossAddsAndRemoves =>
@@ -216,12 +217,12 @@ TestCase subclass: PriorityQueueTest
     self assert: q1 size equals: 1
     self assert: q2 size equals: 2
     self assert: q3 size equals: 4
-    q4 := (q3 removeMin) at: 2
-    q5 := (q4 removeMin) at: 2
+    q4 := q3 removeMin
+    q5 := q4 removeMin
     self assert: q4 size equals: 3
     self assert: q5 size equals: 2
     self assert: q5 isEmpty equals: false
-    q6 := (((q5 removeMin) at: 2) removeMin) at: 2
+    q6 := q5 removeMin removeMin
     self assert: q6 size equals: 0
     self assert: q6 isEmpty equals: true
 
@@ -264,6 +265,14 @@ TestCase subclass: PriorityQueueTest
     self assert: q size equals: 3
     self assert: q asSortedList equals: #(1, 2, 3)
 
+  testRemoveMinAnswersAQueueNotAPair =>
+    // `removeMin` answers only the remaining queue; pair it with `peek` for
+    // the element, the way `List rest` pairs with `List first`.
+    rest := (PriorityQueue withAll: #(5, 1)) removeMin
+    self assert: (rest isKindOf: PriorityQueue) equals: true
+    self assert: rest peek equals: 5
+    self assert: rest size equals: 1
+
   testAsSortedListOnSingleton =>
     self assert: (PriorityQueue withAll: #(42)) asSortedList equals: #(42)
 
@@ -274,9 +283,20 @@ TestCase subclass: PriorityQueueTest
     byCost := [:a :b | (a at: 1) <= (b at: 1)]
     q := (PriorityQueue sortedBy: byCost) addAll: #((Tuple withAll: #(10, #b)), (Tuple withAll: #(4, #b)), (Tuple withAll: #(7, #c)))
     best := #{#b => 4, #c => 7}
-    live := q asSortedList select: [:entry |
-      (entry at: 1) =:= (best at: (entry at: 2))
-    ]
-    self assert: live size equals: 2
-    self assert: (live first at: 1) equals: 4
-    self assert: (live first at: 2) equals: #b
+
+    // Pop with the documented `peek` + `removeMin` pairing: the cheapest
+    // entry for #b is live, the stale cost-10 duplicate for #b is skipped.
+    firstEntry := q peek
+    self assert: (firstEntry at: 1) equals: 4
+    self assert: (firstEntry at: 2) equals: #b
+    self assert: ((firstEntry at: 1) =:= (best at: (firstEntry at: 2))) equals: true
+
+    secondEntry := q removeMin peek
+    self assert: (secondEntry at: 1) equals: 7
+    self assert: ((secondEntry at: 1) =:= (best at: (secondEntry at: 2))) equals: true
+
+    staleEntry := q removeMin removeMin peek
+    self assert: (staleEntry at: 1) equals: 10
+    self assert: (staleEntry at: 2) equals: #b
+    self assert: ((staleEntry at: 1) =:= (best at: (staleEntry at: 2))) equals: false
+    self assert: q removeMin removeMin removeMin isEmpty equals: true
