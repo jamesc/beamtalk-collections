@@ -264,8 +264,9 @@ TestCase subclass: DequeTest
     self assert: seen reversed equals: #(1, 2, 3, 4)
 
   testPrintString =>
-    self assert: Deque new printString equals: "Deque"
-    self assert: (Deque withAll: #(1, 2)) printString equals: "Deque"
+    self assert: Deque new printString equals: "Deque(0)"
+    self assert: (Deque withAll: #(1, 2)) printString equals: "Deque(2)"
+    self assert: (Deque withAll: #(1, 2)) removeFirst printString equals: "Deque(1)"
 
   // === Inherited Collection protocol ===
   testInheritedIncludes =>

@@ -263,13 +263,15 @@ typed Collection(E) subclass: Deque(E)
   reversed -> Deque(E) =>
     Deque new: #{#front => self.rear, #rear => self.front, #count => self.count}
 
-  /// Return a developer-readable string representation.
+  /// Return a developer-readable string representation, carrying the element
+  /// count — matching `PriorityQueue`, `SortedMap` and `SortedSet`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Deque new printString   // => "Deque"
+  /// Deque new printString                    // => "Deque(0)"
+  /// (Deque withAll: #(1, 2, 3)) printString   // => "Deque(3)"
   /// ```
-  printString -> String => "Deque"
+  printString -> String => "Deque(" ++ self.count printString ++ ")"
 
   // === Internal ===
 
