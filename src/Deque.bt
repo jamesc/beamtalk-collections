@@ -20,12 +20,22 @@
 /// access to both ends, or `reversed` (which is O(1) here — it just swaps the
 /// two Lists).
 ///
+/// Element and remainder are separate accessors — `first`/`removeFirst` and
+/// `last`/`removeLast`, mirroring `List first` / `List rest` — rather than one
+/// message answering a pair. Nothing is lost by splitting them: the Deque is
+/// immutable, and both halves are (amortised) O(1). The raising accessors each
+/// have a non-raising `…IfEmpty:` counterpart in the style of
+/// `Collection>>detect:ifNone:`.
+///
 /// ## Examples
 /// ```beamtalk
 /// Deque new isEmpty                                  // => true
 /// (Deque withAll: #(1, 2, 3)) size                   // => 3
 /// (Deque withAll: #(1, 2, 3)) first                  // => 1
 /// (Deque withAll: #(1, 2, 3)) last                   // => 3
+/// (Deque withAll: #(1, 2, 3)) removeFirst asList     // => #(2, 3)
+/// (Deque withAll: #(1, 2, 3)) removeLast asList      // => #(1, 2)
+/// Deque new firstIfEmpty: [0]                        // => 0
 /// ((Deque new addLast: 1) addFirst: 0) asList        // => #(0, 1)
 /// (Deque withAll: #(1, 2, 3)) reversed asList        // => #(3, 2, 1)
 /// ```
@@ -78,69 +88,72 @@ typed Collection(E) subclass: Deque(E)
       rear: (self.rear addFirst: element)
       count: self.count + 1
 
-  /// Remove the front element, answering a `{element, deque}` Tuple.
+  /// Remove the front element, answering just the remaining Deque.
   ///
-  /// Amortised O(1). Matches the shape of `Queue>>dequeue`: element first,
-  /// the remaining Deque second. Raises a `#beamtalk_error` when the Deque is
-  /// empty — check `isEmpty` first.
+  /// Amortised O(1). Pair it with `first` when you need the removed element
+  /// too — the same element-plus-remainder split as `List first` / `List rest`.
+  /// Raises a `#beamtalk_error` when the Deque is empty; use
+  /// `removeFirstIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// result := (Deque withAll: #(1, 2, 3)) removeFirst
-  /// result at: 1            // => 1
-  /// (result at: 2) asList   // => #(2, 3)
+  /// d := Deque withAll: #(1, 2, 3)
+  /// d first             // => 1
+  /// d removeFirst asList   // => #(2, 3)
   /// ```
-  removeFirst -> Tuple =>
+  removeFirst -> Deque(E) =>
     self isEmpty ifTrue: [self error: "Deque removeFirst: deque is empty"]
-    self.front isEmpty
-      ifTrue: [
-        // Invariant: an empty front means rear holds at most one element.
-        Tuple
-          withAll: #(self.rear last, (self
-            rebalancedFront: #()
-            rear: (self.rear take: self.rear size - 1)
-            count: self.count - 1))
-      ]
-      ifFalse: [
-        Tuple
-          withAll: #(self.front first, (self
-            rebalancedFront: self.front rest
-            rear: self.rear
-            count: self.count - 1))
-      ]
+    self droppedFront
 
-  /// Remove the back element, answering a `{element, deque}` Tuple.
+  /// Remove the front element, answering just the remaining Deque, or evaluate
+  /// `emptyBlock` and answer its value when the Deque is empty.
   ///
-  /// Amortised O(1). Raises a `#beamtalk_error` when the Deque is empty.
+  /// Amortised O(1). The non-raising counterpart to `removeFirst`, in the
+  /// style of `Collection>>detect:ifNone:`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// result := (Deque withAll: #(1, 2, 3)) removeLast
-  /// result at: 1            // => 3
-  /// (result at: 2) asList   // => #(1, 2)
+  /// ((Deque withAll: #(1, 2)) removeFirstIfEmpty: [nil]) asList   // => #(2)
+  /// Deque new removeFirstIfEmpty: [#empty]                        // => #empty
   /// ```
-  removeLast -> Tuple =>
+  removeFirstIfEmpty: emptyBlock :: Block(Object) -> Deque(E) | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self droppedFront
+
+  /// Remove the back element, answering just the remaining Deque.
+  ///
+  /// Amortised O(1). Pair it with `last` when you need the removed element
+  /// too. Raises a `#beamtalk_error` when the Deque is empty; use
+  /// `removeLastIfEmpty:` for a non-raising variant.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// d := Deque withAll: #(1, 2, 3)
+  /// d last              // => 3
+  /// d removeLast asList    // => #(1, 2)
+  /// ```
+  removeLast -> Deque(E) =>
     self isEmpty ifTrue: [self error: "Deque removeLast: deque is empty"]
-    self.rear isEmpty
-      ifTrue: [
-        // Invariant: an empty rear means front holds at most one element.
-        Tuple
-          withAll: #(self.front last, (self
-            rebalancedFront: (self.front take: self.front size - 1)
-            rear: #()
-            count: self.count - 1))
-      ]
-      ifFalse: [
-        Tuple
-          withAll: #(self.rear first, (self
-            rebalancedFront: self.front
-            rear: self.rear rest
-            count: self.count - 1))
-      ]
+    self droppedRear
+
+  /// Remove the back element, answering just the remaining Deque, or evaluate
+  /// `emptyBlock` and answer its value when the Deque is empty.
+  ///
+  /// Amortised O(1). The non-raising counterpart to `removeLast`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Deque withAll: #(1, 2)) removeLastIfEmpty: [nil]) asList   // => #(1)
+  /// Deque new removeLastIfEmpty: [#empty]                        // => #empty
+  /// ```
+  removeLastIfEmpty: emptyBlock :: Block(Object) -> Deque(E) | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self droppedRear
 
   /// Return the front element without removing it.
   ///
-  /// O(1). Raises a `#beamtalk_error` when the Deque is empty.
+  /// O(1). Raises a `#beamtalk_error` when the Deque is empty; use
+  /// `firstIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -148,11 +161,26 @@ typed Collection(E) subclass: Deque(E)
   /// ```
   first -> E =>
     self isEmpty ifTrue: [self error: "Deque first: deque is empty"]
-    self.front isEmpty ifTrue: [self.rear last] ifFalse: [self.front first]
+    self peekFront
+
+  /// Return the front element without removing it, or evaluate `emptyBlock`
+  /// and answer its value when the Deque is empty.
+  ///
+  /// O(1). The non-raising counterpart to `first`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Deque withAll: #(1, 2)) firstIfEmpty: [0]   // => 1
+  /// Deque new firstIfEmpty: [0]                  // => 0
+  /// ```
+  firstIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self peekFront
 
   /// Return the back element without removing it.
   ///
-  /// O(1). Raises a `#beamtalk_error` when the Deque is empty.
+  /// O(1). Raises a `#beamtalk_error` when the Deque is empty; use
+  /// `lastIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -160,7 +188,21 @@ typed Collection(E) subclass: Deque(E)
   /// ```
   last -> E =>
     self isEmpty ifTrue: [self error: "Deque last: deque is empty"]
-    self.rear isEmpty ifTrue: [self.front last] ifFalse: [self.rear first]
+    self peekRear
+
+  /// Return the back element without removing it, or evaluate `emptyBlock`
+  /// and answer its value when the Deque is empty.
+  ///
+  /// O(1). The non-raising counterpart to `last`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Deque withAll: #(1, 2)) lastIfEmpty: [0]   // => 2
+  /// Deque new lastIfEmpty: [0]                  // => 0
+  /// ```
+  lastIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self peekRear
 
   // === Collection protocol ===
 
@@ -230,6 +272,49 @@ typed Collection(E) subclass: Deque(E)
   printString -> String => "Deque"
 
   // === Internal ===
+
+  /// The front element, assuming the Deque is non-empty. An empty `front` List
+  /// means (by the balance invariant) `rear` holds the sole element.
+  internal peekFront -> E =>
+    self.front isEmpty ifTrue: [self.rear last] ifFalse: [self.front first]
+
+  /// The back element, assuming the Deque is non-empty.
+  internal peekRear -> E =>
+    self.rear isEmpty ifTrue: [self.front last] ifFalse: [self.rear first]
+
+  /// The Deque without its front element, assuming it is non-empty.
+  internal droppedFront -> Deque(E) =>
+    self.front isEmpty
+      ifTrue: [
+        // Invariant: an empty front means rear holds at most one element.
+        self
+          rebalancedFront: #()
+          rear: (self.rear take: self.rear size - 1)
+          count: self.count - 1
+      ]
+      ifFalse: [
+        self
+          rebalancedFront: self.front rest
+          rear: self.rear
+          count: self.count - 1
+      ]
+
+  /// The Deque without its back element, assuming it is non-empty.
+  internal droppedRear -> Deque(E) =>
+    self.rear isEmpty
+      ifTrue: [
+        // Invariant: an empty rear means front holds at most one element.
+        self
+          rebalancedFront: (self.front take: self.front size - 1)
+          rear: #()
+          count: self.count - 1
+      ]
+      ifFalse: [
+        self
+          rebalancedFront: self.front
+          rear: self.rear rest
+          count: self.count - 1
+      ]
 
   /// Build a Deque from `f`/`r`/`n`, restoring the balance invariant: whenever
   /// one List is empty the other holds at most one element. Called by every

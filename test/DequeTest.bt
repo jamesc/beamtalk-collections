@@ -58,16 +58,20 @@ TestCase subclass: DequeTest
 
   // === Removing at both ends ===
   testRemoveFirst =>
-    result := (Deque withAll: #(1, 2, 3)) removeFirst
-    self assert: (result at: 1) equals: 1
-    self assert: (result at: 2) asList equals: #(2, 3)
-    self assert: (result at: 2) size equals: 2
+    d := Deque withAll: #(1, 2, 3)
+    self assert: d first equals: 1
+    rest := d removeFirst
+    self assert: rest class equals: Deque
+    self assert: rest asList equals: #(2, 3)
+    self assert: rest size equals: 2
 
   testRemoveLast =>
-    result := (Deque withAll: #(1, 2, 3)) removeLast
-    self assert: (result at: 1) equals: 3
-    self assert: (result at: 2) asList equals: #(1, 2)
-    self assert: (result at: 2) size equals: 2
+    d := Deque withAll: #(1, 2, 3)
+    self assert: d last equals: 3
+    rest := d removeLast
+    self assert: rest class equals: Deque
+    self assert: rest asList equals: #(1, 2)
+    self assert: rest size equals: 2
 
   testRemoveFirstIsImmutable =>
     d := Deque withAll: #(1, 2, 3)
@@ -76,28 +80,26 @@ TestCase subclass: DequeTest
 
   testRemoveFirstDownToEmpty =>
     d := Deque withAll: #(1, 2)
-    r1 := d removeFirst
-    self assert: (r1 at: 1) equals: 1
-    r2 := (r1 at: 2) removeFirst
-    self assert: (r2 at: 1) equals: 2
-    self assert: (r2 at: 2) isEmpty
-    self assert: (r2 at: 2) size equals: 0
+    self assert: d first equals: 1
+    d2 := d removeFirst
+    self assert: d2 first equals: 2
+    d3 := d2 removeFirst
+    self assert: d3 isEmpty
+    self assert: d3 size equals: 0
 
   testRemoveLastDownToEmpty =>
     d := Deque withAll: #(1, 2)
-    r1 := d removeLast
-    self assert: (r1 at: 1) equals: 2
-    r2 := (r1 at: 2) removeLast
-    self assert: (r2 at: 1) equals: 1
-    self assert: (r2 at: 2) isEmpty
+    self assert: d last equals: 2
+    d2 := d removeLast
+    self assert: d2 last equals: 1
+    self assert: d2 removeLast isEmpty
 
   testRemoveSingleElement =>
-    result := (Deque withAll: #(7)) removeFirst
-    self assert: (result at: 1) equals: 7
-    self assert: (result at: 2) isEmpty
-    result2 := (Deque withAll: #(7)) removeLast
-    self assert: (result2 at: 1) equals: 7
-    self assert: (result2 at: 2) isEmpty
+    d := Deque withAll: #(7)
+    self assert: d first equals: 7
+    self assert: d removeFirst isEmpty
+    self assert: d last equals: 7
+    self assert: d removeLast isEmpty
 
   // === Peeking ===
   testFirstAndLast =>
@@ -154,14 +156,13 @@ TestCase subclass: DequeTest
     d := d addLast: 2
     d := d addFirst: 0
     self assert: d asList equals: #(0, 1, 2)
-    r := d removeLast
-    self assert: (r at: 1) equals: 2
-    d := (r at: 2) addLast: 3
+    self assert: d last equals: 2
+    d := d removeLast addLast: 3
     self assert: d asList equals: #(0, 1, 3)
-    r2 := d removeFirst
-    self assert: (r2 at: 1) equals: 0
-    self assert: (r2 at: 2) asList equals: #(1, 3)
-    self assert: (r2 at: 2) size equals: 2
+    self assert: d first equals: 0
+    d := d removeFirst
+    self assert: d asList equals: #(1, 3)
+    self assert: d size equals: 2
 
   // === Empty-end errors ===
   testRemoveFirstOnEmptyRaises =>
@@ -175,10 +176,54 @@ TestCase subclass: DequeTest
   testLastOnEmptyRaises => self should: [Deque new last] raise: #user_error
 
   testDrainedEmptyStillRaises =>
-    d := Deque withAll: #(1)
-    empty := (d removeFirst) at: 2
+    empty := (Deque withAll: #(1)) removeFirst
     self should: [empty first] raise: #user_error
     self should: [empty removeLast] raise: #user_error
+
+  // === Non-raising ifEmpty: variants ===
+  testFirstIfEmptyOnEmpty =>
+    self assert: (Deque new firstIfEmpty: [0]) equals: 0
+    self assert: (Deque new firstIfEmpty: [#empty]) equals: #empty
+
+  testFirstIfEmptyOnNonEmptyIgnoresBlock =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: (d firstIfEmpty: [0]) equals: 1
+
+  testLastIfEmptyOnEmpty =>
+    self assert: (Deque new lastIfEmpty: [0]) equals: 0
+    self assert: (Deque new lastIfEmpty: [#empty]) equals: #empty
+
+  testLastIfEmptyOnNonEmptyIgnoresBlock =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: (d lastIfEmpty: [0]) equals: 3
+
+  testRemoveFirstIfEmptyOnEmpty =>
+    self assert: (Deque new removeFirstIfEmpty: [#empty]) equals: #empty
+    self assert: (Deque new removeFirstIfEmpty: [nil]) equals: nil
+
+  testRemoveFirstIfEmptyOnNonEmptyIgnoresBlock =>
+    d := Deque withAll: #(1, 2, 3)
+    rest :: Deque := d removeFirstIfEmpty: [#empty]
+    self assert: rest class equals: Deque
+    self assert: rest asList equals: #(2, 3)
+
+  testRemoveLastIfEmptyOnEmpty =>
+    self assert: (Deque new removeLastIfEmpty: [#empty]) equals: #empty
+    self assert: (Deque new removeLastIfEmpty: [nil]) equals: nil
+
+  testRemoveLastIfEmptyOnNonEmptyIgnoresBlock =>
+    d := Deque withAll: #(1, 2, 3)
+    rest :: Deque := d removeLastIfEmpty: [#empty]
+    self assert: rest class equals: Deque
+    self assert: rest asList equals: #(1, 2)
+
+  // Draining with the ifEmpty: variants never raises.
+  testIfEmptyVariantsDrainWithoutRaising =>
+    step1 :: Deque := (Deque withAll: #(1, 2)) removeFirstIfEmpty: [#empty]
+    step2 :: Deque := step1 removeFirstIfEmpty: [#empty]
+    self assert: step2 isEmpty
+    self assert: (step2 removeFirstIfEmpty: [#empty]) equals: #empty
+    self assert: (step2 firstIfEmpty: [#empty]) equals: #empty
 
   // === reversed ===
   testReversed =>
@@ -200,9 +245,8 @@ TestCase subclass: DequeTest
 
   testReversedThenRemove =>
     d := (Deque withAll: #(1, 2, 3)) reversed
-    r := d removeFirst
-    self assert: (r at: 1) equals: 3
-    self assert: (r at: 2) asList equals: #(2, 1)
+    self assert: d first equals: 3
+    self assert: d removeFirst asList equals: #(2, 1)
 
   // === Conversions and iteration ===
   testAsList =>
@@ -277,30 +321,22 @@ TestCase subclass: DequeTest
 
   // === Helpers ===
 
-  // Repeatedly `removeFirst` until empty, answering the elements in the order
-  // they came out.
+  // Repeatedly `first` + `removeFirst` until empty, answering the elements in
+  // the order they came out.
   drainFront: deque :: Deque -> List =>
-    deque isEmpty
-      ifTrue: [#()]
-      ifFalse: [
-        result := deque removeFirst
-        (self drainFront: (result at: 2)) addFirst: (result at: 1)
-      ]
+    deque isEmpty ifTrue: [
+      #()
+    ] ifFalse: [(self drainFront: deque removeFirst) addFirst: deque first]
 
-  // Repeatedly `removeLast` until empty, answering the elements in the order
-  // they came out.
+  // Repeatedly `last` + `removeLast` until empty, answering the elements in
+  // the order they came out.
   drainRear: deque :: Deque -> List =>
-    deque isEmpty
-      ifTrue: [#()]
-      ifFalse: [
-        result := deque removeLast
-        (self drainRear: (result at: 2)) addFirst: (result at: 1)
-      ]
+    deque isEmpty ifTrue: [
+      #()
+    ] ifFalse: [(self drainRear: deque removeLast) addFirst: deque last]
 
   // The size of the deque before each `removeFirst`, front to back.
   drainFrontSizes: deque :: Deque -> List =>
     deque isEmpty ifTrue: [
       #()
-    ] ifFalse: [
-      (self drainFrontSizes: ((deque removeFirst) at: 2)) addFirst: deque size
-    ]
+    ] ifFalse: [(self drainFrontSizes: deque removeFirst) addFirst: deque size]

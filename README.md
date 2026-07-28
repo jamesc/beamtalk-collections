@@ -68,20 +68,31 @@ Unlike core `Queue`, whose `size` is O(n), `Deque` tracks its element count in s
 | `Deque withAll: aList` | `Deque` | O(n) | Elements in order |
 | `addFirst: element` | `Deque` | O(1) amortised | New deque with `element` at the front |
 | `addLast: element` | `Deque` | O(1) amortised | New deque with `element` at the back |
-| `removeFirst` | `Tuple` | O(1) amortised | `{element, deque}` — raises when empty |
-| `removeLast` | `Tuple` | O(1) amortised | `{element, deque}` — raises when empty |
 | `first` | element | O(1) | Raises when empty |
 | `last` | element | O(1) | Raises when empty |
+| `removeFirst` | `Deque` | O(1) amortised | The remaining deque — raises when empty |
+| `removeLast` | `Deque` | O(1) amortised | The remaining deque — raises when empty |
+| `firstIfEmpty: aBlock` | element \| block value | O(1) | Non-raising `first` |
+| `lastIfEmpty: aBlock` | element \| block value | O(1) | Non-raising `last` |
+| `removeFirstIfEmpty: aBlock` | `Deque` \| block value | O(1) amortised | Non-raising `removeFirst` |
+| `removeLastIfEmpty: aBlock` | `Deque` \| block value | O(1) amortised | Non-raising `removeLast` |
 | `size` | `Integer` | O(1) | Count tracked in state |
 | `isEmpty` | `Boolean` | O(1) | |
 | `do: aBlock` | `Nil` | O(n) | Iterates front to back |
 | `asList` | `List` | O(n) | Front to back |
 | `reversed` | `Deque` | O(1) | Swaps the two Lists |
 
-`removeFirst`/`removeLast` answer a `{element, deque}` `Tuple`, matching the shape of core
-`Queue>>dequeue`; read the parts with `at: 1` and `at: 2`. Accessing or removing from an empty end
-raises a structured `#beamtalk_error` (a `#user_error`) rather than answering `nil` — check `isEmpty`
-first.
+Element and remainder are **separate accessors** — `first`/`removeFirst` and `last`/`removeLast`,
+mirroring `List first` / `List rest` — rather than one message answering a pair. Nothing is lost by
+splitting them: the deque is immutable, so there is no atomicity to preserve, and both halves are
+(amortised) O(1).
+
+Accessing or removing from an empty end raises a structured `#beamtalk_error` (a `#user_error`)
+rather than answering `nil` — that matches `Dictionary at:` and `Queue peek`, and empty-end access is
+caller misuse rather than an environmental failure (so it is an exception, not a `Result`, per ADR
+0060). Each raising accessor is paired with a non-raising `…IfEmpty:` variant that evaluates the block
+and answers its value instead, in the style of `Dictionary at:ifAbsent:` and
+`Collection detect:ifNone:`.
 
 `Deque` is a `Collection` subclass, so the whole inherited `Collection` protocol works too:
 `collect:`, `select:`, `reject:`, `detect:`, `includes:`, `inject:into:`, `count:`, `sum`, `asSet`,
@@ -91,14 +102,19 @@ first.
 d := collections@Deque withAll: #(2, 3)
 d := d addFirst: 1
 d := d addLast: 4
-d asList                       // => #(1, 2, 3, 4)
-d size                         // => 4
+d asList                          // => #(1, 2, 3, 4)
+d size                            // => 4
 
-result := d removeFirst
-result at: 1                   // => 1
-(result at: 2) asList          // => #(2, 3, 4)
+d first                           // => 1
+d removeFirst asList              // => #(2, 3, 4)
+d last                            // => 4
+d removeLast asList               // => #(1, 2, 3)
 
-d reversed asList              // => #(4, 3, 2, 1)
+collections@Deque new first       // raises #beamtalk_error
+collections@Deque new firstIfEmpty: [0]             // => 0
+collections@Deque new removeFirstIfEmpty: [#empty]  // => #empty
+
+d reversed asList                 // => #(4, 3, 2, 1)
 (d collect: [:x | x * 2]) asList  // => #(2, 4, 6, 8)
 ```
 
