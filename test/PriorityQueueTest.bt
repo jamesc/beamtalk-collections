@@ -276,6 +276,87 @@ TestCase subclass: PriorityQueueTest
   testAsSortedListOnSingleton =>
     self assert: (PriorityQueue withAll: #(42)) asSortedList equals: #(42)
 
+  // === Rebuilding operations preserve the receiver's ordering ===
+  // `Collection` rebuilds these via `self species withAll:`, and `species`
+  // answers a class, which cannot carry the comparator. PriorityQueue
+  // overrides them; these tests pin that the receiver's order survives.
+  testCollectPreservesComparator =>
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
+    mapped := maxHeap collect: [:x | x * 10]
+    self assert: mapped peek equals: 30
+    self assert: mapped asSortedList equals: #(30, 20, 10)
+    self assert: mapped size equals: 3
+
+  testSelectPreservesComparator =>
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5)
+    kept := maxHeap select: [:x | x > 2]
+    self assert: kept peek equals: 5
+    self assert: kept asSortedList equals: #(5, 4)
+
+  testRejectPreservesComparator =>
+    // `reject:` is inherited; it delegates to `select:`, so the override
+    // covers it. This pins that the delegation really does carry through.
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5)
+    kept := maxHeap reject: [:x | x > 2]
+    self assert: kept peek equals: 2
+    self assert: kept asSortedList equals: #(2, 1)
+
+  testParallelCollectPreservesComparator =>
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
+    mapped := maxHeap parallelCollect: [:x | x * 10]
+    self assert: mapped peek equals: 30
+    self assert: mapped asSortedList equals: #(30, 20, 10)
+
+  testParallelCollectMaxConcurrencyPreservesComparator =>
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3, 4)
+    mapped := maxHeap parallelCollect: [:x | x * 10] maxConcurrency: 2
+    self assert: mapped peek equals: 40
+    self assert: mapped asSortedList equals: #(40, 30, 20, 10)
+
+  testRebuildPreservesOrderingTokenNotJustTheBlock =>
+    // The token, not only the comparator, must carry through — otherwise the
+    // rebuilt queue could no longer be merged with the queue it came from.
+    byDescending := [:a :b | a >= b]
+    maxHeap := (PriorityQueue sortedBy: byDescending) addAll: #(1, 4, 2)
+    self assert: (maxHeap collect: [:x | x + 0]) ordering equals: byDescending
+    self assert: (maxHeap select: [:x | x > 1]) ordering equals: byDescending
+    self assert: (maxHeap reject: [:x | x > 1]) ordering equals: byDescending
+    self assert: (maxHeap parallelCollect: [:x |
+      x + 0
+    ]) ordering equals: byDescending
+
+  testRebuiltQueueStillMergesWithItsSource =>
+    maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2)
+    kept := maxHeap select: [:x | x > 1]
+    merged := kept merge: maxHeap
+    self assert: merged size equals: 5
+    self assert: merged peek equals: 4
+    self assert: merged asSortedList equals: #(4, 4, 2, 2, 1)
+    self assert: ((maxHeap collect: [:x | x * 1]) merge: maxHeap) peek equals: 4
+
+  testRebuildPreservesNonNumericComparator =>
+    byLength := [:a :b | a size <= b size]
+    q := (PriorityQueue sortedBy: byLength) addAll: #("mmmm", "z", "ccc", "yy")
+    kept := q select: [:s | s size > 1]
+    self assert: kept peek equals: "yy"
+    self assert: kept asSortedList equals: #("yy", "ccc", "mmmm")
+    mapped := q collect: [:s | s ++ "!"]
+    self assert: mapped peek equals: "z!"
+    self assert: mapped asSortedList equals: #("z!", "yy!", "ccc!", "mmmm!")
+
+  testRebuildOnDefaultQueueStaysNatural =>
+    q := PriorityQueue withAll: #(3, 1, 2)
+    self assert: (q collect: [:x | x * 2]) asSortedList equals: #(2, 4, 6)
+    self assert: (q select: [:x | x > 1]) asSortedList equals: #(2, 3)
+    self assert: (q collect: [:x | x * 2]) ordering equals: #natural
+    self assert: ((q select: [:x | x > 1]) merge: q) size equals: 5
+
+  testRebuildOfEmptyQueueKeepsOrdering =>
+    maxHeap := PriorityQueue sortedBy: [:a :b | a >= b]
+    mapped := maxHeap collect: [:x | x * 10]
+    self assert: mapped isEmpty equals: true
+    self assert: (mapped addAll: #(1, 9, 4)) peek equals: 9
+
   // === Stale-entry workaround for the missing decrease-key ===
   testStaleEntryWorkaroundForDecreaseKey =>
     // The documented Dijkstra pattern: push a duplicate at the lower priority

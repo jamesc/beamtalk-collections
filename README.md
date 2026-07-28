@@ -67,6 +67,25 @@ b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
 `includes:`, …) — walks the heap, not a sorted sequence. Only the minimum is guaranteed to come first.
 Use `asSortedList` (O(n log n), a repeated `removeMin` drain) when you want ordered output.
 
+**Rebuilding operations keep your ordering.** `collect:`, `select:`, `reject:`, and the
+`parallelCollect:` pair all answer a queue that carries the receiver's comparator *and* its ordering
+token, so a max-heap stays a max-heap and the result can still be merged with the queue it came from.
+These are overridden here rather than inherited: `Collection` rebuilds via `self species withAll:`, and
+`species` answers a *class*, which cannot carry per-queue state — the inherited versions would silently
+hand back a `#natural` min-heap.
+
+```beamtalk
+maxHeap := (collections@PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5).
+(maxHeap select: [:x | x > 2]) asSortedList     // => #(5, 4)
+(maxHeap reject: [:x | x > 2]) asSortedList     // => #(2, 1)
+(maxHeap collect: [:x | x * 10]) peek           // => 50
+```
+
+Note that `collect:` maps `E -> R`, so a comparator written against `E` may not be meaningful for `R`.
+It is preserved anyway: you explicitly chose that ordering, and silently reverting to natural order is a
+worse failure mode than a comparator that raises. Mapping to a type your comparator cannot handle is
+caller error — go through `asSortedList` or `asList` first if you want out of the ordering.
+
 **Empty queues.** `peek` and `removeMin` raise on an empty queue; `peekIfEmpty:` and `removeMinIfEmpty:`
 take a block and return its value instead. These raise rather than answering a `Result` on purpose:
 per [ADR 0060](https://github.com/jamesc/beamtalk/blob/main/docs/ADR/0060-result-type-hybrid-error-handling.md),

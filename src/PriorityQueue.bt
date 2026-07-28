@@ -306,9 +306,10 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// `asList`, `detect:`, …) inherits that same lack of order. Use
   /// `asSortedList` when order matters.
   ///
-  /// Note that `collect:` and `select:` build their result via
-  /// `PriorityQueue class>>withAll:`, so they answer a queue with the
-  /// *default* ordering, not the receiver's comparator.
+  /// The methods that answer a *new queue* — `collect:`, `select:`,
+  /// `reject:`, and the `parallelCollect:` pair — are overridden here so the
+  /// result keeps this queue's comparator and ordering token. They do not go
+  /// through `species`, whose class-only result cannot carry that state.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -317,6 +318,82 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// (PriorityQueue withAll: #(1, 2, 3)) asList sort    // => #(1, 2, 3)
   /// ```
   do: block :: Block(E, Object) -> Nil => self eachFrom: self.root do: block
+
+  /// Collect the results of `block`, keeping this queue's ordering.
+  ///
+  /// `Collection>>collect:` rebuilds via `self species withAll:`, and `species`
+  /// answers a *class* — which cannot carry this queue's comparator, so the
+  /// inherited version would silently hand back a `#natural` min-heap. This
+  /// override folds `add:` over `emptyLike` instead, so the comparator and the
+  /// ordering token both survive.
+  ///
+  /// `block` maps `E -> R`, so a comparator written against `E` may not be
+  /// meaningful for `R`. Preserving it is deliberate: the caller explicitly
+  /// chose that ordering, and quietly reverting to natural order is a worse
+  /// failure than a comparator that raises. Mapping to a type the comparator
+  /// cannot handle is caller error — map to a `List` first if you want out.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
+  /// (maxHeap collect: [:x | x * 10]) asSortedList   // => #(30, 20, 10)
+  /// (maxHeap collect: [:x | x * 10]) peek           // => 30
+  /// ```
+  collect: block :: Block(E, R) -> PriorityQueue(R) =>
+    self inject: self emptyLike into: [:heap :each |
+      heap add: (block value: each)
+    ]
+
+  /// Select the elements satisfying `block`, keeping this queue's ordering.
+  ///
+  /// Overridden for the same reason as `collect:` — see there. `reject:` is
+  /// inherited unchanged: `Collection>>reject:` is defined as `self select:`
+  /// with the test negated, so it picks this override up for free.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5)
+  /// (maxHeap select: [:x | x > 2]) asSortedList     // => #(5, 4)
+  /// (maxHeap reject: [:x | x > 2]) asSortedList     // => #(2, 1)
+  /// ```
+  select: block :: Block(E, Boolean) -> PriorityQueue(E) =>
+    self inject: self emptyLike into: [:heap :each |
+      (block value: each) ifTrue: [heap add: each] ifFalse: [heap]
+    ]
+
+  /// Like `collect:`, but evaluates `block` for every element concurrently.
+  ///
+  /// Delegates the concurrency to `List>>parallelCollect:` — inherited from
+  /// `Collection`, so the spawning, failure, and ordering behaviour documented
+  /// there all apply unchanged — then rebuilds the queue with this one's
+  /// comparator and ordering token rather than via `species`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
+  /// (maxHeap parallelCollect: [:x | x * 10]) asSortedList   // => #(30, 20, 10)
+  /// ```
+  parallelCollect: block :: Block(E, R) -> PriorityQueue(R) =>
+    (self asList parallelCollect: block) inject: self emptyLike into: [:heap :each |
+      heap add: each
+    ]
+
+  /// Like `parallelCollect:`, but bounds concurrency to `maxConcurrency`.
+  ///
+  /// Delegates to `List>>parallelCollect:maxConcurrency:` — inherited from
+  /// `Collection`, so the chunking, failure, and validation behaviour
+  /// documented there all apply unchanged — then rebuilds the queue with this
+  /// one's comparator and ordering token rather than via `species`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// maxHeap := (PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 2, 3)
+  /// (maxHeap parallelCollect: [:x | x * 10] maxConcurrency: 2) peek   // => 30
+  /// ```
+  parallelCollect: block :: Block(E, R) maxConcurrency: maxConcurrency :: Integer -> PriorityQueue(R) =>
+    (self asList parallelCollect: block maxConcurrency: maxConcurrency) inject: self emptyLike into: [:heap :each |
+      heap add: each
+    ]
 
   /// Drain the whole queue into a sorted `List`. O(n log n).
   ///
@@ -348,6 +425,10 @@ typed Collection(E) subclass: PriorityQueue(E)
   internal popRoot -> PriorityQueue(E) =>
     {_element, children} := self.root
     self withRoot: (self mergePairs: children) count: self.count - 1
+
+  /// An empty queue carrying this one's comparator and ordering token — the
+  /// seed the rebuilding methods (`collect:`, `select:`, …) fold `add:` over.
+  internal emptyLike -> PriorityQueue(E) => self withRoot: nil count: 0
 
   /// Build a sibling queue that keeps this one's comparator and ordering.
   internal withRoot: newRoot :: Object count: newCount :: Integer -> PriorityQueue(E) =>
