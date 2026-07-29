@@ -17,7 +17,8 @@ discovery). It dogfoods the package system introduced by ADR 0070 (namespaces) a
 ## Structures
 
 `collections@Deque` (a banker's deque) landed in
-[BT-3011](https://linear.app/beamtalk/issue/BT-3011), and `collections@SortedMap` / `collections@SortedSet`
+[BT-3011](https://linear.app/beamtalk/issue/BT-3011), `collections@PriorityQueue` (a pairing heap) in
+[BT-3013](https://linear.app/beamtalk/issue/BT-3013), and `collections@SortedMap` / `collections@SortedSet`
 (weight-balanced trees) in [BT-3012](https://linear.app/beamtalk/issue/BT-3012). Nothing has been published to
 the registry yet, so depend on this repo as a git dependency for now (see
 [Adding this as a dependency](#adding-this-as-a-dependency)).
@@ -25,9 +26,10 @@ the registry yet, so depend on this repo as a git dependency for now (see
 | Structure | Status |
 |---|---|
 | [`Deque`](#deque) | Shipped |
+| [`PriorityQueue`](#priorityqueue) | Shipped |
 | [`SortedMap`](#sortedmap) | Shipped |
 | [`SortedSet`](#sortedset) | Shipped |
-| `PriorityQueue`, `Zipper`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
+| `Zipper`, `CatenableList`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
 
 ## Usage
 
@@ -121,6 +123,99 @@ d reversed asList                 // => #(4, 3, 2, 1)
 (d collect: [:x | x * 2]) asList  // => #(2, 4, 6, 8)
 ```
 
+## PriorityQueue
+
+A persistent priority queue. `add:` and `merge:` are O(1) (they link two trees and stop), `removeMin`
+is O(log n) amortised, and `size` is O(1) because the count is carried in the queue's state. Every
+operation returns a new queue — the receiver is never modified.
+
+```beamtalk
+q := collections@PriorityQueue withAll: #(5, 1, 3).
+q peek                    // => 1
+q size                    // => 3
+q asSortedList            // => #(1, 3, 5)
+
+rest := q removeMin.      // just the remaining queue — no pair to unpack
+rest peek                 // => 3
+rest size                 // => 2
+```
+
+`peek` and `removeMin` are deliberately separate: `peek` answers the minimum element, `removeMin` answers
+the queue without it. That follows the `List first` / `List rest` idiom used throughout the stdlib rather
+than returning an element-plus-remainder pair. Everything here is immutable, so there is no atomicity to
+preserve by fusing them, and neither half gets more expensive for being split — `peek` is O(1) and
+`removeMin` is O(log n) amortised either way.
+
+**Ordering.** A two-argument comparator block returning a Boolean, the same convention as `List>>sort:`
+— it answers "should `a` come out before `b`?". The default is `[:a :b | a <= b]`, a min-heap.
+
+```beamtalk
+maxHeap := collections@PriorityQueue sortedBy: [:a :b | a >= b].
+(maxHeap addAll: #(5, 1, 9)) peek     // => 9
+```
+
+**`merge:` and comparator identity.** Merging two queues that order elements differently would produce a
+heap whose `peek` is not the minimum, so `merge:` refuses it. Each queue carries an *ordering token*
+(readable via `ordering`) that `merge:` compares with `=:=`: `new` uses `#natural`, `sortedBy:` uses the
+comparator block itself, and `sortedBy:labelled:` uses a label you supply. Blocks compare by identity, so
+two separately written literals never match even when they read the same — use `sortedBy:labelled:` to
+declare independently built comparators equivalent.
+
+`#natural` is reserved for the default ordering and is rejected as an explicit label. Allowing it would
+collide with the token `new` and `withAll:` assign, so `merge:` would accept a foreign comparator and
+splice its subtree in whole — `peek` would still answer correctly while a full drain came out unsorted.
+
+```beamtalk
+a := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
+b := collections@PriorityQueue sortedBy: [:x :y | x >= y] labelled: #descending.
+((a add: 1) merge: (b add: 9)) peek   // => 9
+
+// different tokens — raises
+(collections@PriorityQueue new) merge: (collections@PriorityQueue sortedBy: [:x :y | x >= y])
+```
+
+**Iteration is unordered.** `do:` — and everything built on it (`collect:`, `select:`, `asList`,
+`includes:`, …) — walks the heap, not a sorted sequence. Only the minimum is guaranteed to come first.
+Use `asSortedList` (O(n log n), a repeated `removeMin` drain) when you want ordered output.
+
+**Rebuilding operations keep your ordering.** `collect:`, `select:`, and `reject:` all answer a queue
+that carries the receiver's comparator *and* its ordering token, so a max-heap stays a max-heap and the
+result can still be merged with the queue it came from. These are overridden here rather than inherited:
+`Collection` rebuilds via `self species withAll:`, and `species` answers a *class*, which cannot carry
+per-queue state — the inherited versions would silently hand back a `#natural` min-heap.
+
+```beamtalk
+maxHeap := (collections@PriorityQueue sortedBy: [:a :b | a >= b]) addAll: #(1, 4, 2, 5).
+(maxHeap select: [:x | x > 2]) asSortedList     // => #(5, 4)
+(maxHeap reject: [:x | x > 2]) asSortedList     // => #(2, 1)
+(maxHeap collect: [:x | x * 10]) peek           // => 50
+```
+
+Note that `collect:` maps `E -> R`, so a comparator written against `E` may not be meaningful for `R`.
+It is preserved anyway: you explicitly chose that ordering, and silently reverting to natural order is a
+worse failure mode than a comparator that raises. Mapping to a type your comparator cannot handle is
+caller error — go through `asSortedList` or `asList` first if you want out of the ordering.
+
+**Empty queues.** `peek` and `removeMin` raise on an empty queue; `peekIfEmpty:` and `removeMinIfEmpty:`
+take a block and return its value instead. These raise rather than answering a `Result` on purpose:
+per [ADR 0060](https://github.com/jamesc/beamtalk/blob/main/docs/ADR/0060-result-type-hybrid-error-handling.md),
+`Result` is for environmental failures (I/O, parsing, network) while exceptions signal caller misuse, and
+asking an empty heap for its minimum is caller misuse.
+
+**No decrease-key.** There is deliberately no `decreaseKey:`, and no efficient one is possible in a
+persistent structure: there are no stable node handles to decrease, and finding an element costs O(n).
+For Dijkstra or A*, use the standard workaround — push a *duplicate* entry at the lower priority and
+discard stale entries as you pop them:
+
+```beamtalk
+entry := queue peek.
+queue := queue removeMin.
+(entry at: 1) =:= (best at: (entry at: 2))
+  ifTrue: [ "…entry is live, relax its neighbours…" ]
+  ifFalse: [ "…stale duplicate, skip it…" ]
+```
+
+Duplicate elements are fully supported: a `PriorityQueue` is a heap, not a set.
 ## SortedMap
 
 An immutable map that keeps its keys in comparator order, filling the `gb_trees` role that core
