@@ -1,0 +1,373 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the library-wide equality contract (BT-3023).
+//
+// Every structure here is persistent and stores its shape as a function of
+// construction history, so Erlang term equality (`=:=`) is representation-
+// dependent: two structures holding the same logical contents compare unequal
+// whenever they were built by different routes. `equals:` is the supported
+// comparison — it normalises through each structure's ordered view first.
+//
+// The tests below deliberately assert *both* halves: that `equals:` answers
+// true across construction routes, and that `=:=` answers false for the very
+// same pair. The second half is not a wish — it pins down the limitation the
+// class docs and README promise, so that a future change to the representation
+// which happens to make `=:=` work cannot silently invalidate the docs.
+
+TestCase subclass: EqualityTest
+
+  // === Deque ===
+
+  // The probe from BT-3023: `a` is built entirely with `addFirst:` so its front
+  // absorbs the growth (front=[5,4,3,2] rear=[1]); `b` is built with `addLast:`
+  // via `withAll:` (front=[5] rear=[1,2,3,4]). Same sequence, different split.
+  testDequeEqualAcrossConstructionRoutes =>
+    a := #(1, 2, 3, 4, 5) inject: Deque new into: [:acc :x | acc addFirst: x]
+    b := Deque withAll: #(5, 4, 3, 2, 1)
+    self assert: a asList equals: b asList
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  // The limitation this issue documents: the same pair is *not* `=:=`.
+  testDequeTermEqualityIsRepresentationDependent =>
+    a := #(1, 2, 3, 4, 5) inject: Deque new into: [:acc :x | acc addFirst: x]
+    b := Deque withAll: #(5, 4, 3, 2, 1)
+    self assert: a asList equals: b asList
+    self deny: (a =:= b)
+
+  testDequeEqualsIsReflexive =>
+    d := Deque withAll: #(1, 2, 3)
+    self assert: (d equals: d)
+
+  testDequeEmptyEqualsEmpty =>
+    self assert: (Deque new equals: Deque new)
+    self assert: (Deque new equals: (Deque withAll: #()))
+
+  testDequeDifferentContents =>
+    self deny: ((Deque withAll: #(1, 2)) equals: (Deque withAll: #(1, 3)))
+
+  testDequeOrderMatters =>
+    self deny: ((Deque withAll: #(1, 2)) equals: (Deque withAll: #(2, 1)))
+
+  testDequeDifferentSize =>
+    self deny: ((Deque withAll: #(1, 2)) equals: (Deque withAll: #(1)))
+
+  // A Deque is never equal to a plain collection holding the same elements.
+  testDequeNotEqualToOtherTypes =>
+    d := Deque withAll: #(1, 2)
+    self deny: (d equals: #(1, 2))
+    self deny: (d equals: (SortedSet withAll: #(1, 2)))
+    self deny: (d equals: nil)
+
+  // Elements are compared with `=:=`, so 1 and 1.0 are different elements —
+  // the same rule that holds everywhere else in Beamtalk.
+  testDequeElementEqualityIsStrict =>
+    self deny: ((Deque withAll: #(1)) equals: (Deque withAll: #(1.0)))
+
+  // A Deque that has been drained back down still equals a freshly built one:
+  // removals rebalance, so this pair differs in split as well as history.
+  testDequeEqualAfterRebalance =>
+    drained := (Deque withAll: #(1, 2, 3, 4, 5)) removeLast removeLast
+    fresh := Deque withAll: #(1, 2, 3)
+    self assert: (drained equals: fresh)
+
+  // === PriorityQueue ===
+  testPriorityQueueEqualAcrossInsertionOrders =>
+    a := PriorityQueue withAll: #(1, 2, 3, 4, 5)
+    b := PriorityQueue withAll: #(5, 4, 3, 2, 1)
+    self assert: a asSortedList equals: b asSortedList
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  testPriorityQueueTermEqualityIsRepresentationDependent =>
+    a := PriorityQueue withAll: #(1, 2, 3, 4, 5)
+    b := PriorityQueue withAll: #(5, 4, 3, 2, 1)
+    self assert: a asSortedList equals: b asSortedList
+    self deny: (a =:= b)
+
+  testPriorityQueueEmptyEqualsEmpty =>
+    self assert: (PriorityQueue new equals: PriorityQueue new)
+    self assert: (PriorityQueue new equals: (PriorityQueue withAll: #()))
+
+  // A heap is not a set: multiplicity is part of the contents.
+  testPriorityQueueDuplicatesCount =>
+    self assert: ((PriorityQueue withAll: #(1, 1, 2)) equals: (PriorityQueue withAll: #(2, 1, 1)))
+    self deny: ((PriorityQueue withAll: #(1, 1)) equals: (PriorityQueue withAll: #(1)))
+
+  testPriorityQueueDifferentContents =>
+    self deny: ((PriorityQueue withAll: #(1, 2)) equals: (PriorityQueue withAll: #(1, 3)))
+
+  // The ordering token is part of a queue's identity — the same rule `merge:`
+  // enforces, so a max-heap is never equal to a min-heap over the same
+  // elements even though both hold #(1, 2).
+  testPriorityQueueOrderingIsPartOfIdentity =>
+    minHeap := PriorityQueue withAll: #(1, 2)
+    maxHeap := PriorityQueue sortedBy: [:a :b | a >= b] withAll: #(1, 2)
+    self deny: (minHeap equals: maxHeap)
+    self deny: (maxHeap equals: minHeap)
+
+  // Two queues sharing one comparator *value* share an ordering token, so they
+  // compare equal across insertion orders.
+  testPriorityQueueSharedComparatorEqualAcrossInsertionOrders =>
+    byDescending := [:a :b | a >= b]
+    a := (PriorityQueue sortedBy: byDescending) addAll: #(1, 2, 3)
+    b := (PriorityQueue sortedBy: byDescending) addAll: #(3, 2, 1)
+    self assert: (a equals: b)
+
+  // Two separately written block literals are different values, so their
+  // queues carry different ordering tokens and refuse to compare equal — the
+  // same conservative rule `merge:` applies. `sortedBy:labelled:` is the way
+  // to declare two comparators interchangeable.
+  testPriorityQueueSeparateComparatorLiteralsAreNotEqual =>
+    a := PriorityQueue sortedBy: [:x :y | x >= y] withAll: #(1, 2)
+    b := PriorityQueue sortedBy: [:x :y | x >= y] withAll: #(1, 2)
+    self deny: (a equals: b)
+
+  testPriorityQueueSharedLabelIsEqual =>
+    a := (PriorityQueue sortedBy: [:x :y |
+      x >= y
+    ] labelled: #descending) addAll: #(1, 2)
+    b := (PriorityQueue sortedBy: [:x :y |
+      x >= y
+    ] labelled: #descending) addAll: #(2, 1)
+    self assert: (a equals: b)
+
+  // Elements are compared as a multiset in Erlang term order rather than by
+  // draining through the comparator. Under this comparator "ab" and "cd" tie,
+  // so drain order between them is decided by heap shape: the two queues below
+  // hold the same three strings but drain as #("ab", "cd", "xyz") and
+  // #("cd", "ab", "xyz"). Comparing `asSortedList` would therefore have
+  // smuggled the representation dependence straight back in.
+  testPriorityQueueTiedElementsCompareByMultiset =>
+    bySize := [:a :b | a size <= b size]
+    a := (PriorityQueue sortedBy: bySize) addAll: #("ab", "cd", "xyz")
+    b := (PriorityQueue sortedBy: bySize) addAll: #("xyz", "cd", "ab")
+    self assert: a asSortedList equals: #("ab", "cd", "xyz")
+    self assert: b asSortedList equals: #("cd", "ab", "xyz")
+    self deny: (a asSortedList =:= b asSortedList)
+    self assert: (a equals: b)
+
+  // `List>>sort` orders numbers arithmetically and is stable, so `1` and `1.0`
+  // — equal in value, distinct under `=:=` — keep whatever order they arrived
+  // in: `#(1, 1.0) sort` is `#(1, 1.0)` and `#(1.0, 1) sort` is `#(1.0, 1)`.
+  // Sorting alone therefore does not canonicalise these; `equals:` falls back
+  // to counting occurrences under `=:=`.
+  testPriorityQueueMixedNumericTypesAreOneMultiset =>
+    a := PriorityQueue withAll: #(1, 1.0)
+    b := PriorityQueue withAll: #(1.0, 1)
+    self deny: (a asList sort =:= b asList sort)
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  // The same tie happens at depth, so a type check on the elements themselves
+  // would not have been enough — `{1}` and `{1.0}` are both Tuples.
+  testPriorityQueueNestedMixedNumericTypesAreOneMultiset =>
+    a := PriorityQueue withAll: #((Tuple withAll: #(1)), (Tuple withAll: #(1.0)))
+    b := PriorityQueue withAll: #((Tuple withAll: #(1.0)), (Tuple withAll: #(1)))
+    self deny: (a asList sort =:= b asList sort)
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  // The fallback must stay exact, not merely lenient: these are genuinely
+  // different multisets that the arithmetic sort cannot tell apart by value.
+  testPriorityQueueMixedNumericMultisetsStillDiffer =>
+    self deny: ((PriorityQueue withAll: #(1, 1)) equals: (PriorityQueue withAll: #(1, 1.0)))
+    self deny: ((PriorityQueue withAll: #(1)) equals: (PriorityQueue withAll: #(1.0)))
+    self deny: ((PriorityQueue withAll: #(1, 1.0)) equals: (PriorityQueue withAll: #(1.0, 1.0)))
+
+  // The class's headline use case: a custom comparator over priority-tagged
+  // entries whose elements have no natural ordering of their own. `Tuple` has
+  // no `<=` method — `respondsTo: #<=` is false — yet `equals:` still works,
+  // because `List>>sort` compiles to `lists:sort/1`, which uses Erlang's total
+  // term order rather than dispatching `<=` as a message. So `equals:` imposes
+  // no ordering requirement on elements beyond what `add:` already needs.
+  testPriorityQueueCustomComparatorOverUnorderedElements =>
+    byCost := [:a :b | (a at: 1) <= (b at: 1)]
+    low := Tuple withAll: #(1, #a)
+    high := Tuple withAll: #(2, #b)
+    self deny: (low respondsTo: #'<=')
+    a := (PriorityQueue sortedBy: byCost) addAll: #(low, high)
+    b := (PriorityQueue sortedBy: byCost) addAll: #(high, low)
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+    self deny: (a equals: ((PriorityQueue sortedBy: byCost) addAll: #(low, low)))
+
+  testPriorityQueueNotEqualToOtherTypes =>
+    q := PriorityQueue withAll: #(1, 2)
+    self deny: (q equals: #(1, 2))
+    self deny: (q equals: (Deque withAll: #(1, 2)))
+    self deny: (q equals: nil)
+
+  // === SortedSet ===
+  testSortedSetEqualAcrossInsertionOrders =>
+    a := SortedSet withAll: #(1, 2, 3, 4, 5)
+    b := SortedSet withAll: #(5, 4, 3, 2, 1)
+    self assert: a asList equals: b asList
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  testSortedSetTermEqualityIsRepresentationDependent =>
+    a := SortedSet withAll: #(1, 2, 3, 4, 5)
+    b := SortedSet withAll: #(5, 4, 3, 2, 1)
+    self assert: a asList equals: b asList
+    self deny: (a =:= b)
+
+  testSortedSetEmptyEqualsEmpty =>
+    self assert: (SortedSet new equals: SortedSet new)
+    self assert: (SortedSet new equals: (SortedSet withAll: #()))
+
+  // Duplicates are discarded on the way in, so these hold the same set.
+  testSortedSetIgnoresDuplicateInserts =>
+    self assert: ((SortedSet withAll: #(1, 2, 2, 1)) equals: (SortedSet withAll: #(2, 1)))
+
+  testSortedSetDifferentContents =>
+    self deny: ((SortedSet withAll: #(1, 2)) equals: (SortedSet withAll: #(1, 3)))
+    self deny: ((SortedSet withAll: #(1, 2)) equals: (SortedSet withAll: #(1)))
+
+  // A set that has had elements added and removed again equals a freshly built
+  // one holding the same elements — deletion rebalances the tree, so this pair
+  // differs in shape.
+  testSortedSetEqualAfterAddAndRemove =>
+    churned := ((SortedSet withAll: #(1, 2, 3)) add: 99) remove: 99
+    fresh := SortedSet withAll: #(3, 2, 1)
+    self assert: (churned equals: fresh)
+
+  testSortedSetOrderingIsPartOfIdentity =>
+    ascending := SortedSet withAll: #(1, 2)
+    descending := SortedSet sortedBy: [:a :b | a >= b] withAll: #(1, 2)
+    self deny: (ascending equals: descending)
+    self deny: (descending equals: ascending)
+
+  testSortedSetSharedComparatorEqualAcrossInsertionOrders =>
+    byDescending := [:a :b | a >= b]
+    a := SortedSet sortedBy: byDescending withAll: #(1, 2, 3)
+    b := SortedSet sortedBy: byDescending withAll: #(3, 2, 1)
+    self assert: (a equals: b)
+
+  // Unlike PriorityQueue, a SortedSet needs no special handling for `1` versus
+  // `1.0`: the comparator decides identity, and under the default ordering the
+  // two are the *same element*, so a set holds only one of them and the later
+  // insert wins. These two sets genuinely hold different elements — `1.0` and
+  // `1` respectively — so answering false is the contents talking, not the
+  // representation.
+  testSortedSetMixedNumericTypesCollapseToOneElement =>
+    a := SortedSet withAll: #(1, 1.0)
+    b := SortedSet withAll: #(1.0, 1)
+    self assert: a size equals: 1
+    self assert: a asList equals: #(1.0)
+    self assert: b asList equals: #(1)
+    self deny: (a equals: b)
+
+  testSortedSetNotEqualToOtherTypes =>
+    s := SortedSet withAll: #(1, 2)
+    self deny: (s equals: #(1, 2))
+    self deny: (s equals: (Set withAll: #(1, 2)))
+    self deny: (s equals: nil)
+
+  // === SortedMap ===
+  testSortedMapEqualAcrossInsertionOrders =>
+    a := SortedMap withAll: #(#(1, "a"), #(2, "b"), #(3, "c"), #(4, "d"), #(5, "e"))
+    b := SortedMap withAll: #(#(5, "e"), #(4, "d"), #(3, "c"), #(2, "b"), #(1, "a"))
+    self assert: a keys equals: b keys
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  testSortedMapTermEqualityIsRepresentationDependent =>
+    a := SortedMap withAll: #(#(1, "a"), #(2, "b"), #(3, "c"), #(4, "d"), #(5, "e"))
+    b := SortedMap withAll: #(#(5, "e"), #(4, "d"), #(3, "c"), #(2, "b"), #(1, "a"))
+    self assert: a keys equals: b keys
+    self deny: (a =:= b)
+
+  testSortedMapEmptyEqualsEmpty =>
+    self assert: (SortedMap new equals: SortedMap new)
+    self assert: (SortedMap new equals: (SortedMap withAll: #()))
+
+  // Same keys, different values — the values are part of the contents.
+  testSortedMapDifferentValues =>
+    a := SortedMap withAll: #(#(1, "a"), #(2, "b"))
+    b := SortedMap withAll: #(#(1, "a"), #(2, "z"))
+    self assert: a keys equals: b keys
+    self deny: (a equals: b)
+
+  testSortedMapDifferentKeys =>
+    a := SortedMap withAll: #(#(1, "a"))
+    b := SortedMap withAll: #(#(2, "a"))
+    self deny: (a equals: b)
+
+  testSortedMapDifferentSize =>
+    a := SortedMap withAll: #(#(1, "a"), #(2, "b"))
+    b := SortedMap withAll: #(#(1, "a"))
+    self deny: (a equals: b)
+
+  // A later `at:put:` on the same key overwrites, so this holds one binding.
+  testSortedMapOverwrittenKeyEqualsFreshlyBuilt =>
+    overwritten := (SortedMap new at: 1 put: "old") at: 1 put: "new"
+    fresh := SortedMap withAll: #(#(1, "new"))
+    self assert: (overwritten equals: fresh)
+
+  testSortedMapEqualAfterAddAndRemove =>
+    churned := ((SortedMap withAll: #(#(1, "a"), #(2, "b"))) at: 99 put: "z") removeKey: 99
+    fresh := SortedMap withAll: #(#(2, "b"), #(1, "a"))
+    self assert: (churned equals: fresh)
+
+  testSortedMapOrderingIsPartOfIdentity =>
+    ascending := SortedMap withAll: #(#(1, "a"), #(2, "b"))
+    descending := SortedMap sortedBy: [:a :b |
+      a >= b
+    ] withAll: #(#(1, "a"), #(2, "b"))
+    self deny: (ascending equals: descending)
+    self deny: (descending equals: ascending)
+
+  testSortedMapSharedComparatorEqualAcrossInsertionOrders =>
+    byDescending := [:a :b | a >= b]
+    a := SortedMap sortedBy: byDescending withAll: #(#(1, "a"), #(2, "b"))
+    b := SortedMap sortedBy: byDescending withAll: #(#(2, "b"), #(1, "a"))
+    self assert: (a equals: b)
+
+  // As for SortedSet: `1` and `1.0` are the same key under the default
+  // ordering, so each map holds one binding and the later key wins.
+  testSortedMapMixedNumericKeysCollapseToOneBinding =>
+    a := SortedMap withAll: #(#(1, "x"), #(1.0, "x"))
+    b := SortedMap withAll: #(#(1.0, "x"), #(1, "x"))
+    self assert: a size equals: 1
+    self assert: a keys equals: #(1.0)
+    self assert: b keys equals: #(1)
+    self deny: (a equals: b)
+
+  testSortedMapNotEqualToOtherTypes =>
+    m := SortedMap withAll: #(#(1, "a"))
+    self deny: (m equals: #{1 => "a"})
+    self deny: (m equals: (SortedSet withAll: #(1)))
+    self deny: (m equals: nil)
+
+  // === The `=:=` consequence for Set and Dictionary ===
+  //
+  // `equals:` is an ordinary message, so only code that calls it benefits.
+  // `Set` membership and `Dictionary` keys are decided by the BEAM itself
+  // using term equality, with no hook to redirect them through `equals:` —
+  // so two structures a user considers identical still occupy separate slots.
+  // These tests pin that consequence down rather than leaving it to prose.
+  testSetDoesNotDeduplicateEqualDeques =>
+    a := #(1, 2, 3, 4, 5) inject: Deque new into: [:acc :x | acc addFirst: x]
+    b := Deque withAll: #(5, 4, 3, 2, 1)
+    self assert: (a equals: b)
+    // Were `Set` able to reach `equals:`, this would be 1.
+    self assert: (Set withAll: (List withAll: #(a, b))) size equals: 2
+
+  testDictionaryDoesNotMergeEqualSortedSetKeys =>
+    a := SortedSet withAll: #(1, 2, 3, 4, 5)
+    b := SortedSet withAll: #(5, 4, 3, 2, 1)
+    self assert: (a equals: b)
+    d := (Dictionary new at: a put: #first) at: b put: #second
+    // Were `Dictionary` able to reach `equals:`, this would be 1.
+    self assert: d size equals: 2
+
+  // The supported way to assert equality in BUnit. `assert:equals:` compares
+  // with `=:=`, so `self assert: a equals: b` fails on this pair — wrap the
+  // comparison instead.
+  testAssertEqualsNeedsTheWrappedForm =>
+    a := PriorityQueue withAll: #(1, 2, 3, 4, 5)
+    b := PriorityQueue withAll: #(5, 4, 3, 2, 1)
+    self assert: (a equals: b)
+    self deny: (a =:= b)

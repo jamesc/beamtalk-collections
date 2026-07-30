@@ -37,6 +37,20 @@
 /// Erring towards refusing a legitimate union is deliberate — the alternative
 /// is silently producing a mis-ordered set.
 ///
+/// ## Equality
+/// Compare two sets with `equals:`, never with `=:=`. The backing tree's shape
+/// depends on the order elements were inserted in, so two sets holding the same
+/// elements are `=:=`-unequal whenever they were built differently — see the
+/// library's "Equality" section in the README.
+///
+/// ```beamtalk
+/// a := SortedSet withAll: #(1, 2, 3)
+/// b := SortedSet withAll: #(3, 2, 1)
+/// a asList                                // => #(1, 2, 3)
+/// b asList                                // => #(1, 2, 3)
+/// a equals: b                             // => true
+/// ```
+///
 /// ## Examples
 /// ```beamtalk
 /// s := SortedSet withAll: #(5, 1, 3, 1)
@@ -499,3 +513,36 @@ typed Collection(E) subclass: SortedSet(E)
   /// SortedSet new printString   // => "SortedSet(0)"
   /// ```
   printString -> String => "SortedSet(" ++ self size printString ++ ")"
+
+  // === Equality ===
+
+  /// Test whether `other` is a SortedSet with the same ordering holding the
+  /// same elements.
+  ///
+  /// O(n). This is the supported way to compare two sets. **`=:=` is not** —
+  /// it is Erlang term equality on the raw weight-balanced tree, whose shape
+  /// records insertion order rather than membership, so it answers `false` for
+  /// two sets holding the same elements but built by different routes.
+  /// `equals:` normalises through `asList` — the in-order traversal, which is
+  /// fixed by the contents alone — so it depends only on what the set holds.
+  ///
+  /// Two sets are equal when `other` is a SortedSet, the two share an ordering
+  /// identity (`ordering`) — the same check `union:` makes, so an ascending
+  /// set is never equal to a descending one over the same elements — and their
+  /// elements match under `=:=`.
+  ///
+  /// The same caveat as elsewhere applies where `equals:` cannot be reached:
+  /// `Set` membership, `Dictionary` keys, and BUnit's `assert:equals:` all use
+  /// `=:=`. Write `self assert: (a equals: b)`, not `self assert: a equals: b`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 2)) equals: (SortedSet withAll: #(2, 1))   // => true
+  /// (SortedSet withAll: #(1, 2)) equals: (SortedSet withAll: #(1))      // => false
+  /// (SortedSet withAll: #(1, 2)) equals: #(1, 2)                        // => false
+  /// SortedSet new equals: SortedSet new                                 // => true
+  /// ```
+  equals: other :: Object -> Boolean =>
+    (other isKindOf: SortedSet) ifFalse: [^false]
+    (self ordering =:= other ordering) ifFalse: [^false]
+    (self size =:= other size) and: [self asList =:= other asList]

@@ -86,6 +86,7 @@ Unlike core `Queue`, whose `size` is O(n), `Deque` tracks its element count in s
 | `do: aBlock` | `Nil` | O(n) | Iterates front to back |
 | `asList` | `List` | O(n) | Front to back |
 | `reversed` | `Deque` | O(1) | Swaps the two Lists |
+| `equals: other` | `Boolean` | O(n) | Same sequence — see [Equality](#equality). Not `=:=` |
 
 Element and remainder are **separate accessors** — `first`/`removeFirst` and `last`/`removeLast`,
 mirroring `List first` / `List rest` — rather than one message answering a pair. Nothing is lost by
@@ -216,6 +217,11 @@ queue := queue removeMin.
 ```
 
 Duplicate elements are fully supported: a `PriorityQueue` is a heap, not a set.
+
+**Comparing two queues.** Use `equals:`, not `=:=` — a pairing heap's shape records the order elements
+were linked in, so two queues holding the same elements compare `=:=`-unequal whenever they were built
+differently. See [Equality](#equality).
+
 ## SortedMap
 
 An immutable map that keeps its keys in comparator order, filling the `gb_trees` role that core
@@ -243,6 +249,7 @@ m floor: 2                        // => 1
 | Nearest neighbours | `floor:`, `floor:ifAbsent:`, `ceiling:`, `ceiling:ifAbsent:` |
 | Range scans | `from:to:`, `from:to:do:` |
 | Conversions | `asDictionary`, `asList`, `asSortedMap` |
+| Equality | `equals:` — see [Equality](#equality). Not `=:=` |
 
 `min` and `max` answer *keys* — the ordered dimension of a map — while `first` and `last` answer the
 values sitting at those keys. `do:` iterates values, matching `Dictionary>>do:`. `withAll:` accepts a
@@ -272,6 +279,7 @@ s union: (collections@SortedSet withAll: #(2))
 | Range scans | `from:to:`, `from:to:do:` |
 | Set algebra | `union:`, `intersection:`, `difference:` |
 | Conversions | `asSet`, `asList`, `asSortedSet` |
+| Equality | `equals:` — see [Equality](#equality). Not `=:=` |
 
 ## Ordering and comparator identity
 
@@ -309,6 +317,94 @@ structured error rather than answering `nil` when there is no such element.
 
 The balanced tree behind both classes (`SortedTreeNode`) is an implementation detail of this package,
 not public API.
+
+## Equality
+
+**Compare these structures with `equals:`, never with `=:=`.**
+
+```beamtalk
+a := #(1, 2, 3) inject: collections@Deque new into: [:acc :x | acc addFirst: x]
+b := collections@Deque withAll: #(3, 2, 1)
+
+a asList        // => #(3, 2, 1)
+b asList        // => #(3, 2, 1)   -- identical contents
+a equals: b     // => true         -- the supported comparison
+a =:= b         // => false        -- representation-dependent, see below
+```
+
+Every structure here is *persistent*, and each one stores its shape as a function of how it was built:
+a `Deque`'s front/rear split records whether it grew from the front or the back, a `PriorityQueue`'s
+pairing heap records the order elements were linked in, and the weight-balanced tree behind `SortedMap`
+and `SortedSet` records insertion order. Two structures holding identical contents therefore hold
+different *terms* whenever they were built by different routes.
+
+Beamtalk's `=:=` is Erlang term equality, applied to those raw terms. So it answers `false` for a pair
+a user would call equal, and `equals:` — which normalises through each structure's ordered view first —
+is what you want instead.
+
+### The rule
+
+`a equals: b` is true when all of these hold:
+
+| Condition | Applies to |
+|---|---|
+| `b` is the same kind of structure | all four |
+| both share an ordering identity (`ordering`) | `PriorityQueue`, `SortedMap`, `SortedSet` |
+| the normalised contents match under `=:=` | all four |
+
+The ordering check is the same one `merge:` / `union:` already make, so a max-heap is never equal to a
+min-heap over the same elements, and an ascending set is never equal to a descending one. Normalised
+contents means `asList` for `Deque` and `SortedSet`, `keys` plus `values` for `SortedMap`, and — for
+`PriorityQueue` — the elements as a *multiset*, so multiplicity counts and `#(1, 1)` is not `#(1)`.
+
+`PriorityQueue` deliberately does **not** compare `asSortedList`. Under a comparator that ranks two
+distinct elements as ties — say `[:a :b | a size <= b size]`, under which `"ab"` and `"cd"` tie — drain
+order between tied elements is decided by heap shape, which would have put the representation dependence
+straight back in. For a comparator that is a total order (the default included) the two agree.
+
+Its multiset check sorts both element lists and compares them, settling almost every pair in O(n log n).
+Sorting alone is not enough: `List>>sort` orders numbers arithmetically and is stable, so `1` and `1.0` —
+equal in value but distinct under `=:=` — keep whatever order they arrived in, and the same holds nested
+(`{1}` versus `{1.0}`). When the sorted lists differ, `equals:` falls back to counting occurrences under
+`=:=`, which is exact at any depth. That fallback is O(n²) and runs only for queues whose sorted forms
+disagree.
+
+`SortedMap` and `SortedSet` need no such handling: their comparator decides identity, so under the
+default ordering `1` and `1.0` are the *same* key and each structure holds only one of them — a
+difference in contents rather than in representation.
+
+### What `equals:` cannot fix
+
+`equals:` is an ordinary message, so only code that calls it benefits. Three places compare terms
+directly, with no hook to redirect them:
+
+* **`Set` membership** and **`Dictionary` keys** are decided by the BEAM itself. Two of these structures
+  that `equals:` calls equal still occupy *separate* slots — a `Set` holding both reports `size` 2, not
+  1. Key or deduplicate on a normalised view (`asList`, `asSortedList`) when you need that to work.
+* **BUnit's `assert:equals:`** uses `=:=`, so `self assert: a equals: b` fails on a pair built two
+  different ways. Write `self assert: (a equals: b)` instead.
+
+`test/EqualityTest.bt` pins all of this down, including the `Set` and `Dictionary` consequences.
+
+### Why not fix `=:=` itself
+
+Two alternatives were considered and rejected.
+
+*Overriding the equality operator* is not possible. Beamtalk has no bare `=` operator — `x = y` does not
+parse — and `=:=` / `==` compile to inline Erlang BIFs at every call site with no message dispatch
+(ADR 0002; see `operators.rs`, "equality is not message-dispatched here"). A method named `=` or `=:=`
+compiles but is never called, so this would have been silently dead code.
+
+*Canonicalising the representation* would fix `=:=`, `Set`, `Dictionary` and `assert:equals:` in one go —
+it is what core `Array` did ([ADR 0090](https://github.com/jamesc/beamtalk/blob/main/docs/ADR/0090-array-canonical-representation.md)).
+It does not carry over here: each structure's bound *depends* on its shape being history-dependent. A
+`Deque` with a fixed front/rear split loses amortised O(1) at both ends, a pairing heap has no canonical
+shape at all (self-adjusting is the whole mechanism), and a weight-balanced tree with no slack costs O(n)
+per insert. Canonicalising would mean giving up the reason each structure exists.
+
+So the limitation is documented and worked around rather than removed. `Value`'s class documentation in
+core stdlib promises "compared by value, not identity", which does not hold for representation-dependent
+subclasses like these — qualifying that promise is tracked separately as a core-stdlib question.
 
 ## Adding this as a dependency
 

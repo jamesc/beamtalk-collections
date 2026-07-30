@@ -37,6 +37,21 @@
 /// order. Only the minimum is known to come first. Use `asSortedList` when
 /// you actually want ordered output.
 ///
+/// ## Equality
+///
+/// Compare two queues with `equals:`, never with `=:=`. A pairing heap's shape
+/// depends on the order elements were linked in, so two queues holding the same
+/// elements are `=:=`-unequal whenever they were built differently — see the
+/// library's "Equality" section in the README.
+///
+/// ```beamtalk
+/// a := PriorityQueue withAll: #(1, 2, 3)
+/// b := PriorityQueue withAll: #(3, 2, 1)
+/// a asSortedList                                        // => #(1, 2, 3)
+/// b asSortedList                                        // => #(1, 2, 3)
+/// a equals: b                                           // => true
+/// ```
+///
 /// ## No decrease-key
 ///
 /// There is no `decreaseKey:`, and there cannot be an efficient one here: a
@@ -406,7 +421,78 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// ```
   printString -> String => "PriorityQueue(" ++ self.count printString ++ ")"
 
+  // === Equality ===
+
+  /// Test whether `other` is a PriorityQueue with the same ordering token
+  /// holding the same multiset of elements.
+  ///
+  /// O(n log n). This is the supported way to compare two queues. **`=:=` is
+  /// not** — it is Erlang term equality on the raw pairing heap, whose shape
+  /// records the order elements were linked in rather than which elements are
+  /// present, so it answers `false` for two queues holding the same elements
+  /// but built by different routes.
+  ///
+  /// Two queues are equal when all three hold:
+  ///
+  /// * `other` is a PriorityQueue,
+  /// * the two share an ordering token (`ordering`) — the same check `merge:`
+  ///   makes, so a min-heap is never equal to a max-heap over the same
+  ///   elements, and
+  /// * they hold the same elements with the same multiplicities. Duplicates
+  ///   count: `#(1, 1)` and `#(1)` are different queues.
+  ///
+  /// Elements are compared as a *multiset*, not by draining through the
+  /// comparator. That matters for a comparator that ranks two distinct
+  /// elements as ties — say `[:a :b | a size <= b size]`, under which `"ab"`
+  /// and `"cd"` tie. Drain order between tied elements is decided by heap
+  /// shape, so comparing `asSortedList` would have smuggled the representation
+  /// dependence straight back in.
+  ///
+  /// The multiset check sorts both element lists and compares them, which
+  /// settles it in O(n log n) for almost every pair. Sorting alone is not
+  /// enough, though: `List>>sort` orders numbers arithmetically and is stable,
+  /// so `1` and `1.0` — equal in value, distinct under `=:=` — keep whatever
+  /// order they arrived in. `#(1, 1.0)` and `#(1.0, 1)` therefore sort to
+  /// themselves, and the same holds nested (`{1}` versus `{1.0}`). When the
+  /// sorted lists differ, the check falls back to counting each element's
+  /// occurrences under `=:=`, which is exact at any depth. That fallback is
+  /// O(n²), and runs only for queues whose sorted forms disagree — either
+  /// genuinely different queues, or ones holding numerically-equal elements of
+  /// different types.
+  ///
+  /// The same caveat as elsewhere applies where `equals:` cannot be reached:
+  /// `Set` membership, `Dictionary` keys, and BUnit's `assert:equals:` all use
+  /// `=:=`. Write `self assert: (a equals: b)`, not `self assert: a equals: b`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(1, 2)) equals: (PriorityQueue withAll: #(2, 1))  // => true
+  /// (PriorityQueue withAll: #(1, 1)) equals: (PriorityQueue withAll: #(1))     // => false
+  /// (PriorityQueue withAll: #(1, 2)) equals: #(1, 2)                           // => false
+  /// PriorityQueue new equals: PriorityQueue new                                // => true
+  /// ```
+  equals: other :: Object -> Boolean =>
+    (other isKindOf: PriorityQueue) ifFalse: [^false]
+    (self.ordering =:= other ordering) ifFalse: [^false]
+    (self.count =:= other size) ifFalse: [^false]
+    mine := self asList sort
+    theirs := other asList sort
+    (mine =:= theirs) or: [self elements: mine matchElements: theirs]
+
   // === Internals ===
+
+  /// Whether two equal-length element lists hold the same elements with the
+  /// same multiplicities, comparing elements with `=:=`.
+  ///
+  /// The exact fallback behind `equals:`, used when sorting alone does not
+  /// settle it — see there. Checking every element of `mine` has the same
+  /// occurrence count in both lists is sufficient given the two are already
+  /// known to be the same length: those counts sum to the length, so `theirs`
+  /// has no room for an element `mine` lacks.
+  internal elements: mine :: List(E) matchElements: theirs :: List(E) -> Boolean =>
+    mine allSatisfy: [:each |
+      (mine count: [:x | x =:= each]) =:= (theirs count: [:x | x =:= each])
+    ]
 
   /// The raw pairing-heap root, so `merge:` can reach another queue's tree.
   internal rootNode -> Object => self.root
