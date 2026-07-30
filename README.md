@@ -355,13 +355,23 @@ is what you want instead.
 The ordering check is the same one `merge:` / `union:` already make, so a max-heap is never equal to a
 min-heap over the same elements, and an ascending set is never equal to a descending one. Normalised
 contents means `asList` for `Deque` and `SortedSet`, `keys` plus `values` for `SortedMap`, and — for
-`PriorityQueue` — the elements as a *multiset in Erlang term order*, so multiplicity counts and
-`#(1, 1)` is not `#(1)`.
+`PriorityQueue` — the elements as a *multiset*, so multiplicity counts and `#(1, 1)` is not `#(1)`.
 
 `PriorityQueue` deliberately does **not** compare `asSortedList`. Under a comparator that ranks two
 distinct elements as ties — say `[:a :b | a size <= b size]`, under which `"ab"` and `"cd"` tie — drain
 order between tied elements is decided by heap shape, which would have put the representation dependence
 straight back in. For a comparator that is a total order (the default included) the two agree.
+
+Its multiset check sorts both element lists and compares them, settling almost every pair in O(n log n).
+Sorting alone is not enough: `List>>sort` orders numbers arithmetically and is stable, so `1` and `1.0` —
+equal in value but distinct under `=:=` — keep whatever order they arrived in, and the same holds nested
+(`{1}` versus `{1.0}`). When the sorted lists differ, `equals:` falls back to counting occurrences under
+`=:=`, which is exact at any depth. That fallback is O(n²) and runs only for queues whose sorted forms
+disagree.
+
+`SortedMap` and `SortedSet` need no such handling: their comparator decides identity, so under the
+default ordering `1` and `1.0` are the *same* key and each structure holds only one of them — a
+difference in contents rather than in representation.
 
 ### What `equals:` cannot fix
 

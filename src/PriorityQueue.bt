@@ -441,13 +441,24 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// * they hold the same elements with the same multiplicities. Duplicates
   ///   count: `#(1, 1)` and `#(1)` are different queues.
   ///
-  /// Elements are compared as a *multiset in Erlang term order*, not by
-  /// draining through the comparator. That matters for a comparator that ranks
-  /// two distinct elements as ties — say `[:a :b | a size <= b size]`, under
-  /// which `"ab"` and `"cd"` tie. Drain order between tied elements is decided
-  /// by heap shape, so comparing `asSortedList` would have smuggled the
-  /// representation dependence straight back in. For a comparator that is a
-  /// total order (the default `[:a :b | a <= b]` included) the two agree.
+  /// Elements are compared as a *multiset*, not by draining through the
+  /// comparator. That matters for a comparator that ranks two distinct
+  /// elements as ties — say `[:a :b | a size <= b size]`, under which `"ab"`
+  /// and `"cd"` tie. Drain order between tied elements is decided by heap
+  /// shape, so comparing `asSortedList` would have smuggled the representation
+  /// dependence straight back in.
+  ///
+  /// The multiset check sorts both element lists and compares them, which
+  /// settles it in O(n log n) for almost every pair. Sorting alone is not
+  /// enough, though: `List>>sort` orders numbers arithmetically and is stable,
+  /// so `1` and `1.0` — equal in value, distinct under `=:=` — keep whatever
+  /// order they arrived in. `#(1, 1.0)` and `#(1.0, 1)` therefore sort to
+  /// themselves, and the same holds nested (`{1}` versus `{1.0}`). When the
+  /// sorted lists differ, the check falls back to counting each element's
+  /// occurrences under `=:=`, which is exact at any depth. That fallback is
+  /// O(n²), and runs only for queues whose sorted forms disagree — either
+  /// genuinely different queues, or ones holding numerically-equal elements of
+  /// different types.
   ///
   /// The same caveat as elsewhere applies where `equals:` cannot be reached:
   /// `Set` membership, `Dictionary` keys, and BUnit's `assert:equals:` all use
@@ -463,9 +474,25 @@ typed Collection(E) subclass: PriorityQueue(E)
   equals: other :: Object -> Boolean =>
     (other isKindOf: PriorityQueue) ifFalse: [^false]
     (self.ordering =:= other ordering) ifFalse: [^false]
-    (self.count =:= other size) and: [self asList sort =:= other asList sort]
+    (self.count =:= other size) ifFalse: [^false]
+    mine := self asList sort
+    theirs := other asList sort
+    (mine =:= theirs) or: [self elements: mine matchElements: theirs]
 
   // === Internals ===
+
+  /// Whether two equal-length element lists hold the same elements with the
+  /// same multiplicities, comparing elements with `=:=`.
+  ///
+  /// The exact fallback behind `equals:`, used when sorting alone does not
+  /// settle it — see there. Checking every element of `mine` has the same
+  /// occurrence count in both lists is sufficient given the two are already
+  /// known to be the same length: those counts sum to the length, so `theirs`
+  /// has no room for an element `mine` lacks.
+  internal elements: mine :: List(E) matchElements: theirs :: List(E) -> Boolean =>
+    mine allSatisfy: [:each |
+      (mine count: [:x | x =:= each]) =:= (theirs count: [:x | x =:= each])
+    ]
 
   /// The raw pairing-heap root, so `merge:` can reach another queue's tree.
   internal rootNode -> Object => self.root

@@ -148,6 +148,33 @@ TestCase subclass: EqualityTest
     self deny: (a asSortedList =:= b asSortedList)
     self assert: (a equals: b)
 
+  // `List>>sort` orders numbers arithmetically and is stable, so `1` and `1.0`
+  // — equal in value, distinct under `=:=` — keep whatever order they arrived
+  // in: `#(1, 1.0) sort` is `#(1, 1.0)` and `#(1.0, 1) sort` is `#(1.0, 1)`.
+  // Sorting alone therefore does not canonicalise these; `equals:` falls back
+  // to counting occurrences under `=:=`.
+  testPriorityQueueMixedNumericTypesAreOneMultiset =>
+    a := PriorityQueue withAll: #(1, 1.0)
+    b := PriorityQueue withAll: #(1.0, 1)
+    self deny: (a asList sort =:= b asList sort)
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+
+  // The same tie happens at depth, so a type check on the elements themselves
+  // would not have been enough — `{1}` and `{1.0}` are both Tuples.
+  testPriorityQueueNestedMixedNumericTypesAreOneMultiset =>
+    a := PriorityQueue withAll: #((Tuple withAll: #(1)), (Tuple withAll: #(1.0)))
+    b := PriorityQueue withAll: #((Tuple withAll: #(1.0)), (Tuple withAll: #(1)))
+    self deny: (a asList sort =:= b asList sort)
+    self assert: (a equals: b)
+
+  // The fallback must stay exact, not merely lenient: these are genuinely
+  // different multisets that the arithmetic sort cannot tell apart by value.
+  testPriorityQueueMixedNumericMultisetsStillDiffer =>
+    self deny: ((PriorityQueue withAll: #(1, 1)) equals: (PriorityQueue withAll: #(1, 1.0)))
+    self deny: ((PriorityQueue withAll: #(1)) equals: (PriorityQueue withAll: #(1.0)))
+    self deny: ((PriorityQueue withAll: #(1, 1.0)) equals: (PriorityQueue withAll: #(1.0, 1.0)))
+
   testPriorityQueueNotEqualToOtherTypes =>
     q := PriorityQueue withAll: #(1, 2)
     self deny: (q equals: #(1, 2))
@@ -199,6 +226,20 @@ TestCase subclass: EqualityTest
     a := SortedSet sortedBy: byDescending withAll: #(1, 2, 3)
     b := SortedSet sortedBy: byDescending withAll: #(3, 2, 1)
     self assert: (a equals: b)
+
+  // Unlike PriorityQueue, a SortedSet needs no special handling for `1` versus
+  // `1.0`: the comparator decides identity, and under the default ordering the
+  // two are the *same element*, so a set holds only one of them and the later
+  // insert wins. These two sets genuinely hold different elements — `1.0` and
+  // `1` respectively — so answering false is the contents talking, not the
+  // representation.
+  testSortedSetMixedNumericTypesCollapseToOneElement =>
+    a := SortedSet withAll: #(1, 1.0)
+    b := SortedSet withAll: #(1.0, 1)
+    self assert: a size equals: 1
+    self assert: a asList equals: #(1.0)
+    self assert: b asList equals: #(1)
+    self deny: (a equals: b)
 
   testSortedSetNotEqualToOtherTypes =>
     s := SortedSet withAll: #(1, 2)
@@ -265,6 +306,16 @@ TestCase subclass: EqualityTest
     a := SortedMap sortedBy: byDescending withAll: #(#(1, "a"), #(2, "b"))
     b := SortedMap sortedBy: byDescending withAll: #(#(2, "b"), #(1, "a"))
     self assert: (a equals: b)
+
+  // As for SortedSet: `1` and `1.0` are the same key under the default
+  // ordering, so each map holds one binding and the later key wins.
+  testSortedMapMixedNumericKeysCollapseToOneBinding =>
+    a := SortedMap withAll: #(#(1, "x"), #(1.0, "x"))
+    b := SortedMap withAll: #(#(1.0, "x"), #(1, "x"))
+    self assert: a size equals: 1
+    self assert: a keys equals: #(1.0)
+    self assert: b keys equals: #(1)
+    self deny: (a equals: b)
 
   testSortedMapNotEqualToOtherTypes =>
     m := SortedMap withAll: #(#(1, "a"))
