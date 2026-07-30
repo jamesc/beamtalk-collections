@@ -1,0 +1,542 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SortedMap — Immutable key-value map that keeps its keys in comparator order.
+///
+/// Core `Dictionary` is a BEAM map: fast, but explicitly *unordered* — its
+/// iteration order is an implementation detail. `SortedMap` fills the
+/// `gb_trees` role instead: ordered traversal, range scans, and
+/// nearest-neighbour queries (`min`, `max`, `floor:`, `ceiling:`), all backed
+/// by a persistent weight-balanced tree with O(log n) `at:`, `at:put:` and
+/// `removeKey:`. Every operation returns a new map; the original is unchanged.
+///
+/// ## Ordering
+/// Order is defined by a two-argument comparator block returning a Boolean —
+/// the same convention as `List sort:` — read as "a sorts at or before b".
+/// The default is ascending natural order, `[:a :b | a <= b]`. Two keys that
+/// compare equal in both directions are *the same key*, so a comparator like
+/// `[:a :b | a size <= b size]` deliberately makes `"ab"` and `"cd"` collide.
+///
+/// ## Comparator identity
+/// **The comparator is part of a map's identity.** Combining maps ordered
+/// differently would silently produce a mis-ordered result, so operations that
+/// take another `SortedMap` first check that both were built with the same
+/// ordering and raise an error otherwise. Sameness is block identity: every
+/// map built with `new` / `withAll:` shares the default ordering and combines
+/// freely, while a map built with `sortedBy:` only combines with maps built
+/// from *that same block value*.
+///
+/// The known limitation of that rule: two separately written but textually
+/// identical block literals are different values, so
+/// `SortedMap sortedBy: [:a :b | a >= b]` written twice yields two maps that
+/// refuse to merge. Bind the comparator to a variable and pass that same
+/// variable to each `sortedBy:` when several interoperable maps are needed.
+/// Erring towards refusing a legitimate merge is deliberate — the alternative
+/// is silently producing a mis-ordered map.
+///
+/// ## Examples
+/// ```beamtalk
+/// m := SortedMap new
+/// m := m at: 3 put: "c"
+/// m := m at: 1 put: "a"
+/// m keys                                        // => #(1, 3)
+/// m at: 1                                       // => "a"
+/// m floor: 2                                    // => 1
+/// (SortedMap sortedBy: [:a :b | a >= b]) class  // => SortedMap
+/// ```
+typed Collection(V) subclass: SortedMap(K, V)
+  field: root :: SortedTreeNode(K, V) | Nil = nil
+  field: comparator :: Block(K, K, Boolean) | Nil = nil
+
+  // === Construction ===
+
+  /// The ordering used when none is given: ascending natural order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap defaultComparator value: 1 value: 2   // => true
+  /// ```
+  @expect type
+  class defaultComparator -> Block(K, K, Boolean) => [:a :b | a <= b]
+
+  /// Create an empty map ordered by `comparator`, a `Block(K, K, Boolean)`
+  /// answering true when its first argument sorts at or before its second.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// m := SortedMap sortedBy: [:a :b | a >= b]
+  /// m := m at: 1 put: "a"
+  /// m := m at: 3 put: "c"
+  /// m keys                                    // => #(3, 1)
+  /// ```
+  class sortedBy: comparator :: Block(K, K, Boolean) -> SortedMap(K, V) =>
+    SortedMap new: #{#comparator => comparator}
+
+  /// Create a map in default order from a `Dictionary`, another `SortedMap`,
+  /// or a collection of two-element key-value pairs (`List` or `Tuple`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #{#b => 2, #a => 1}) keys        // => #(#a, #b)
+  /// (SortedMap withAll: #(#(1, "a"), #(2, "b"))) size    // => 2
+  /// ```
+  class withAll: source :: Collection -> SortedMap(K, V) =>
+    self fill: SortedMap new from: source
+
+  /// Create a map ordered by `comparator` from a `Dictionary`, another
+  /// `SortedMap`, or a collection of two-element key-value pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap sortedBy: [:a :b | a >= b] withAll: #{#a => 1, #b => 2}) keys
+  ///   // => #(#b, #a)
+  /// ```
+  class sortedBy: comparator :: Block(K, K, Boolean) withAll: source :: Collection -> SortedMap(K, V) =>
+    self fill: (self sortedBy: comparator) from: source
+
+  /// Insert every pair of `source` into `target`, accepting either a
+  /// keyed collection (`Dictionary`, `SortedMap`) or a collection of
+  /// two-element pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap fill: SortedMap new from: #{#a => 1}) size   // => 1
+  /// ```
+  @expect type
+  class fill: target :: SortedMap(K, V) from: source :: Collection -> SortedMap(K, V) =>
+    (source respondsTo: #keysAndValuesDo:)
+      ifTrue: [
+        source keys inject: target into: [:acc :k |
+          acc at: k put: (source at: k)
+        ]
+      ]
+      ifFalse: [
+        source inject: target into: [:acc :pair |
+          acc at: (pair at: 1) put: (pair at: 2)
+        ]
+      ]
+
+  /// The comparator block actually in force. A `nil` in the `comparator`
+  /// field means "default ordering"; storing `nil` rather than a block is what
+  /// lets two independently built default-ordered structures recognise each
+  /// other as compatible.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new comparator value: 1 value: 2   // => true
+  /// ```
+  @expect type
+  comparator -> Block(K, K, Boolean) =>
+    self.comparator isNil ifTrue: [[:a :b | a <= b]] ifFalse: [self.comparator]
+
+  /// This map's ordering *identity* — `nil` for the default order, otherwise
+  /// the comparator block itself. Named to match `PriorityQueue>>ordering`.
+  ///
+  /// Distinct from `comparator`, which resolves `nil` to a usable block: two
+  /// separately built default-ordered maps must compare equal here, and two
+  /// freshly resolved default blocks would not.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new ordering   // => nil
+  /// ```
+  ordering -> Object => self.comparator
+
+  /// The backing tree, resolving the stored `nil` placeholder to the empty
+  /// tree sentinel.
+  internal tree -> SortedTreeNode(K, V) =>
+    self.root isNil ifTrue: [SortedTreeNode new] ifFalse: [self.root]
+
+  /// A map with the same ordering as the receiver but a different tree.
+  internal withRoot: newRoot :: SortedTreeNode(K, V) | Nil -> SortedMap(K, V) =>
+    SortedMap new: #{#root => newRoot, #comparator => self.comparator}
+
+  /// Raise unless `other` is ordered by the same comparator as the receiver.
+  ///
+  /// Compares ordering *identity*, not the resolved blocks — see `ordering`.
+  internal assertSameOrderingAs: other :: SortedMap(K, V) -> Boolean =>
+    (self ordering =:= other ordering)
+      ifTrue: [true]
+      ifFalse: [
+        self error: "SortedMap: comparator mismatch — both maps must be ordered by the same comparator block"
+      ]
+
+  // === Size ===
+
+  /// Number of key-value pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap new at: 1 put: "a") size   // => 1
+  /// SortedMap new size                    // => 0
+  /// ```
+  size -> Integer => self tree weight
+
+  /// Test whether the map holds no pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new isEmpty                    // => true
+  /// (SortedMap new at: 1 put: "a") isEmpty   // => false
+  /// ```
+  isEmpty -> Boolean => self tree isEmptyNode
+
+  // === Lookup ===
+
+  /// Value stored under `key`. Raises an error when the key is absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap new at: 1 put: "a") at: 1   // => "a"
+  /// ```
+  at: key :: K -> V =>
+    self at: key ifAbsent: [self error: "SortedMap: key not found"]
+
+  /// Value stored under `key`, or the result of `absentBlock` when absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new at: 1 ifAbsent: [#missing]   // => #missing
+  /// ```
+  at: key :: K ifAbsent: absentBlock :: Block(Object) -> V | Object =>
+    self tree
+      at: key
+      using: self comparator
+      ifAbsent: absentBlock
+
+  /// Test whether `key` is present, comparing with the map's comparator.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap new at: 1 put: "a") includesKey: 1   // => true
+  /// SortedMap new includesKey: 1                    // => false
+  /// ```
+  includesKey: key :: K -> Boolean =>
+    self tree containsKey: key using: self comparator
+
+  // === Update ===
+
+  /// Map with `key` bound to `value`, replacing any existing binding.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap new at: 1 put: "a") at: 1 put: "z") at: 1   // => "z"
+  /// ```
+  at: key :: K put: value :: V -> SortedMap(K, V) =>
+    self
+      withRoot: (self tree
+        insert: key
+        val: value
+        using: self comparator)
+
+  /// Map with `key` removed; unchanged when the key is absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap new at: 1 put: "a") removeKey: 1) isEmpty   // => true
+  /// (SortedMap new removeKey: 1) isEmpty                    // => true
+  /// ```
+  removeKey: key :: K -> SortedMap(K, V) =>
+    self withRoot: (self tree delete: key using: self comparator)
+
+  // === Ordered traversal ===
+
+  /// Iterate over the values in ascending key order.
+  ///
+  /// Matches `Dictionary>>do:`, which also iterates values — use
+  /// `keysAndValuesDo:` when the keys are wanted too.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #{#a => 1}) do: [:v | Transcript show: v]
+  /// ```
+  do: block :: Block(V, Object) -> Nil =>
+    self tree foldAcc: nil block: [:_acc :_k :v | block value: v]
+    nil
+
+  /// Iterate over key-value pairs in ascending key order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #{#a => 1}) keysAndValuesDo: [:k :v | Transcript show: k]
+  /// ```
+  keysAndValuesDo: block :: Block(K, V, Object) -> Nil =>
+    self tree foldAcc: nil block: [:_acc :k :v | block value: k value: v]
+    nil
+
+  /// Keys in ascending comparator order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) keys   // => #(1, 2)
+  /// ```
+  keys -> List(K) =>
+    (self tree foldAcc: #() block: [:acc :k :_v | acc addFirst: k]) reversed
+
+  /// Values ordered by their keys.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) values   // => #("a", "b")
+  /// ```
+  values -> List(V) =>
+    (self tree foldAcc: #() block: [:acc :_k :v | acc addFirst: v]) reversed
+
+  /// Map `block` over every value, keeping the keys and the ordering.
+  ///
+  /// Overrides `Collection>>collect:`, which would otherwise try to rebuild a
+  /// map out of bare values.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #{#a => 1}) collect: [:v | v * 10]) values   // => #(10)
+  /// ```
+  collect: block :: Block(V, R) -> SortedMap(K, R) =>
+    source := self
+    self keys inject: (self withRoot: nil) into: [:acc :k |
+      acc at: k put: (block value: (source at: k))
+    ]
+
+  /// Select the bindings whose *value* satisfies `block`, keeping the keys and
+  /// the receiver's ordering.
+  ///
+  /// Overrides `Collection>>select:`, which rebuilds through
+  /// `self species withAll:` — a class-side constructor that cannot see this
+  /// map's `comparator` field, so a custom-ordered map would silently come
+  /// back in natural order. `Collection>>reject:` is pure delegation to
+  /// `select:`, so it inherits the fix and needs no override of its own.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #(#(1, 10), #(2, 20))) select: [:v | v > 15]) keys   // => #(2)
+  /// ((SortedMap withAll: #(#(1, 10), #(2, 20))) reject: [:v | v > 15]) keys   // => #(1)
+  /// ```
+  select: block :: Block(V, Boolean) -> SortedMap(K, V) =>
+    source := self
+    self keys
+      inject: (self withRoot: nil)
+      into: [:acc :k |
+        bound := source at: k
+        (block value: bound) ifTrue: [acc at: k put: bound] ifFalse: [acc]
+      ]
+
+  /// Map holding every binding of the receiver overlaid with those of
+  /// `other` — `other`'s value wins where both hold the same key, matching
+  /// `Dictionary>>merge:`.
+  ///
+  /// Raises an error when the two maps are ordered by different comparators:
+  /// merging maps that disagree about ordering could only produce a
+  /// mis-ordered result, so it is refused rather than guessed at.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #(#(1, "a"))) merge: (SortedMap withAll: #(#(2, "b")))) keys
+  ///   // => #(1, 2)
+  /// ```
+  merge: other :: SortedMap(K, V) -> SortedMap(K, V) =>
+    self assertSameOrderingAs: other
+    other keys inject: self into: [:acc :k | acc at: k put: (other at: k)]
+
+  // === Ends ===
+
+  /// Smallest key. Raises an error when the map is empty.
+  ///
+  /// `min` and `max` answer *keys*, because keys are the ordered dimension
+  /// of a map; `first` and `last` answer the values sitting at those keys.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) min   // => 1
+  /// ```
+  min -> K =>
+    self isEmpty ifTrue: [self error: "SortedMap min: map is empty"]
+    self tree minNode key
+
+  /// Largest key. Raises an error when the map is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) max   // => 2
+  /// ```
+  max -> K =>
+    self isEmpty ifTrue: [self error: "SortedMap max: map is empty"]
+    self tree maxNode key
+
+  /// Value stored under the smallest key. Raises an error when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) first   // => "a"
+  /// ```
+  first -> V =>
+    self isEmpty ifTrue: [self error: "SortedMap first: map is empty"]
+    self tree minNode val
+
+  /// Value stored under the largest key. Raises an error when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) last   // => "b"
+  /// ```
+  last -> V =>
+    self isEmpty ifTrue: [self error: "SortedMap last: map is empty"]
+    self tree maxNode val
+
+  /// Smallest key, or `emptyBlock`'s value when the map is empty.
+  ///
+  /// The non-raising counterpart of `min`, mirroring `at:ifAbsent:` and
+  /// `Deque>>firstIfEmpty:`. Note `min`/`max` answer *keys* while
+  /// `first`/`last` answer *values*; their `IfEmpty:` forms keep that split.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) minIfEmpty: [0]   // => 1
+  /// SortedMap new minIfEmpty: [0]                                  // => 0
+  /// ```
+  minIfEmpty: emptyBlock :: Block(Object) -> K | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode key
+
+  /// Largest key, or `emptyBlock`'s value when the map is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) maxIfEmpty: [0]   // => 2
+  /// SortedMap new maxIfEmpty: [0]                                  // => 0
+  /// ```
+  maxIfEmpty: emptyBlock :: Block(Object) -> K | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode key
+
+  /// Value under the smallest key, or `emptyBlock`'s value when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new firstIfEmpty: [#none]   // => #none
+  /// ```
+  firstIfEmpty: emptyBlock :: Block(Object) -> V | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode val
+
+  /// Value under the largest key, or `emptyBlock`'s value when empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new lastIfEmpty: [#none]   // => #none
+  /// ```
+  lastIfEmpty: emptyBlock :: Block(Object) -> V | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode val
+
+  // === Nearest neighbours ===
+
+  /// Greatest key that sorts at or before `key`. Raises an error when every
+  /// key sorts after it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) floor: 3   // => 1
+  /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) floor: 5   // => 5
+  /// ```
+  floor: key :: K -> K =>
+    self floor: key ifAbsent: [
+      self error: "SortedMap floor: no key sorts at or before the given key"
+    ]
+
+  /// Greatest key that sorts at or before `key`, or the result of
+  /// `absentBlock` when every key sorts after it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(5, "e"))) floor: 1 ifAbsent: [#none]   // => #none
+  /// ```
+  floor: key :: K ifAbsent: absentBlock :: Block(Object) -> K | Object =>
+    found := self tree
+      floorNodeFor: key
+      using: self comparator
+      best: nil
+    found isNil ifTrue: [absentBlock value] ifFalse: [found key]
+
+  /// Least key that sorts at or after `key`. Raises an error when every key
+  /// sorts before it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) ceiling: 3   // => 5
+  /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) ceiling: 1   // => 1
+  /// ```
+  ceiling: key :: K -> K =>
+    self ceiling: key ifAbsent: [
+      self error: "SortedMap ceiling: no key sorts at or after the given key"
+    ]
+
+  /// Least key that sorts at or after `key`, or the result of `absentBlock`
+  /// when every key sorts before it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"))) ceiling: 5 ifAbsent: [#none]   // => #none
+  /// ```
+  ceiling: key :: K ifAbsent: absentBlock :: Block(Object) -> K | Object =>
+    found := self tree
+      ceilingNodeFor: key
+      using: self comparator
+      best: nil
+    found isNil ifTrue: [absentBlock value] ifFalse: [found key]
+
+  // === Range scans ===
+
+  /// Sub-map of every pair whose key sorts within `[low, high]` inclusive,
+  /// keeping the receiver's ordering. Neither bound has to be a key.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #(#(1, "a"), #(3, "c"), #(5, "e"))) from: 2 to: 5) keys
+  ///   // => #(3, 5)
+  /// ```
+  from: low :: K to: high :: K -> SortedMap(K, V) =>
+    empty := self withRoot: nil
+    self tree
+      foldRangeFrom: low
+      to: high
+      using: self comparator
+      acc: empty
+      block: [:acc :k :v | acc at: k put: v]
+
+  /// Streaming form of `from:to:` — evaluate `block` with each key and value
+  /// in the inclusive range, in ascending order, building nothing.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"))) from: 1 to: 9 do: [:k :v | Transcript show: k]
+  /// ```
+  from: low :: K to: high :: K do: block :: Block(K, V, Object) -> Nil =>
+    self tree
+      foldRangeFrom: low
+      to: high
+      using: self comparator
+      acc: nil
+      block: [:_acc :k :v | block value: k value: v]
+    nil
+
+  // === Conversions ===
+
+  /// Hand the pairs back to core as an unordered `Dictionary`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"))) asDictionary   // => #{1 => "a"}
+  /// ```
+  asDictionary -> Dictionary(K, V) =>
+    self tree foldAcc: #{} block: [:acc :k :v | acc at: k put: v]
+
+  /// A `SortedMap` is already a `SortedMap`.
+  asSortedMap -> SortedMap(K, V) => self
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedMap new printString   // => "SortedMap(0)"
+  /// ```
+  printString -> String => "SortedMap(" ++ self size printString ++ ")"

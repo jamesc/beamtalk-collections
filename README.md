@@ -17,16 +17,19 @@ discovery). It dogfoods the package system introduced by ADR 0070 (namespaces) a
 ## Structures
 
 `collections@Deque` (a banker's deque) landed in
-[BT-3011](https://linear.app/beamtalk/issue/BT-3011), and `collections@PriorityQueue` (a pairing heap) in
-[BT-3013](https://linear.app/beamtalk/issue/BT-3013). Nothing has been published to the registry yet, so
-depend on this repo as a git dependency for now (see
+[BT-3011](https://linear.app/beamtalk/issue/BT-3011), `collections@PriorityQueue` (a pairing heap) in
+[BT-3013](https://linear.app/beamtalk/issue/BT-3013), and `collections@SortedMap` / `collections@SortedSet`
+(weight-balanced trees) in [BT-3012](https://linear.app/beamtalk/issue/BT-3012). Nothing has been published to
+the registry yet, so depend on this repo as a git dependency for now (see
 [Adding this as a dependency](#adding-this-as-a-dependency)).
 
 | Structure | Status |
 |---|---|
 | [`Deque`](#deque) | Shipped |
 | [`PriorityQueue`](#priorityqueue) | Shipped |
-| `SortedMap`, `SortedSet`, `Zipper`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
+| [`SortedMap`](#sortedmap) | Shipped |
+| [`SortedSet`](#sortedset) | Shipped |
+| `Zipper`, `CatenableList`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
 
 ## Usage
 
@@ -213,11 +216,103 @@ queue := queue removeMin.
 ```
 
 Duplicate elements are fully supported: a `PriorityQueue` is a heap, not a set.
+## SortedMap
+
+An immutable map that keeps its keys in comparator order, filling the `gb_trees` role that core
+`Dictionary` (a deliberately unordered BEAM map) cannot. Backed by a persistent weight-balanced tree,
+so `at:`, `at:put:` and `removeKey:` are O(log n) and every operation returns a new map.
+
+```beamtalk
+m := collections@SortedMap new
+m := m at: 3 put: "c"
+m := m at: 1 put: "a"
+m keys                            // => #(1, 3)
+m min                             // => 1
+m floor: 2                        // => 1
+(m from: 1 to: 2) keys            // => #(1)
+```
+
+| Group | Messages |
+|---|---|
+| Construction | `new`, `sortedBy:`, `withAll:`, `sortedBy:withAll:` |
+| Lookup | `at:`, `at:ifAbsent:`, `includesKey:`, `size`, `isEmpty` |
+| Update | `at:put:`, `removeKey:`, `merge:` |
+| Ordered traversal | `do:`, `keysAndValuesDo:`, `keys`, `values` |
+| Derived maps | `collect:`, `select:`, `reject:` |
+| Ends | `min`, `max`, `first`, `last` |
+| Nearest neighbours | `floor:`, `floor:ifAbsent:`, `ceiling:`, `ceiling:ifAbsent:` |
+| Range scans | `from:to:`, `from:to:do:` |
+| Conversions | `asDictionary`, `asList`, `asSortedMap` |
+
+`min` and `max` answer *keys* — the ordered dimension of a map — while `first` and `last` answer the
+values sitting at those keys. `do:` iterates values, matching `Dictionary>>do:`. `withAll:` accepts a
+`Dictionary`, another `SortedMap`, or any collection of two-element key-value pairs.
+
+## SortedSet
+
+The `gb_sets` counterpart, sharing `SortedMap`'s tree: a set is that map with nothing hanging off the
+keys.
+
+```beamtalk
+s := collections@SortedSet withAll: #(5, 1, 3, 1)
+s asList                          // => #(1, 3, 5)
+s ceiling: 2                      // => 3
+(s from: 2 to: 5) asList          // => #(3, 5)
+s union: (collections@SortedSet withAll: #(2))
+```
+
+| Group | Messages |
+|---|---|
+| Construction | `new`, `sortedBy:`, `withAll:`, `sortedBy:withAll:` |
+| Membership | `add:`, `remove:`, `includes:`, `size`, `isEmpty` |
+| Ordered traversal | `do:`, `asList` |
+| Derived sets | `collect:`, `select:`, `reject:` |
+| Ends | `min`, `max`, `first`, `last` |
+| Nearest neighbours | `floor:`, `floor:ifAbsent:`, `ceiling:`, `ceiling:ifAbsent:` |
+| Range scans | `from:to:`, `from:to:do:` |
+| Set algebra | `union:`, `intersection:`, `difference:` |
+| Conversions | `asSet`, `asList`, `asSortedSet` |
+
+## Ordering and comparator identity
+
+Both classes order themselves with a two-argument block returning a Boolean — the same convention as
+core `List sort:` — read as "a sorts at or before b". The default is ascending natural order,
+`[:a :b | a <= b]`; pass your own to `sortedBy:`.
+
+```beamtalk
+byLength := [:a :b | a size <= b size]
+collections@SortedSet sortedBy: byLength withAll: #("ccc", "a", "bb")   // => "a", "bb", "ccc"
+```
+
+That comparator also decides *identity*: two keys or elements that sort at-or-before each other in both
+directions are the same key. A set ordered by `byLength` therefore holds at most one string of each
+length.
+
+**The comparator is part of the structure's identity.** Combining two collections that disagree about
+ordering could only produce a mis-ordered result, so `SortedMap>>merge:` and `SortedSet>>union:`,
+`intersection:` and `difference:` raise an error instead of guessing. Sameness is decided by *block
+identity*: everything built with `new` or `withAll:` shares the default ordering and combines freely,
+while anything built with `sortedBy:` combines only with structures built from that same block value.
+Bind the block to a variable and reuse it when several interoperable collections are needed.
+
+`collect:`, `select:` and `reject:` are overridden on both classes so their results keep the receiver's
+comparator. The inherited `Collection` versions rebuild through `self species withAll:` — a class-side
+constructor that cannot see the receiver's `comparator` field — so a custom-ordered structure would
+otherwise come back silently reordered. `reject:` is pure delegation to `select:` in `Collection`, so
+overriding `select:` fixes it too. On `SortedSet>>collect:` the comparator is preserved even though the
+block maps `E -> R`: the caller chose that ordering, and failing loudly on an incompatible element beats
+quietly reverting to natural order.
+
+Range scans are inclusive of both bounds, and neither bound has to be present in the collection.
+`min`, `max`, `first`, `last` and the `ifAbsent:`-less `at:`, `floor:` and `ceiling:` raise a
+structured error rather than answering `nil` when there is no such element.
+
+The balanced tree behind both classes (`SortedTreeNode`) is an implementation detail of this package,
+not public API.
 
 ## Adding this as a dependency
 
-Once a version has been published to the registry (starting with `collections@Deque` in BT-3011), add it
-to a project's `beamtalk.toml` with:
+Once a version has been published to the registry, add it to a project's `beamtalk.toml` with:
 
 ```bash
 beamtalk deps add collections

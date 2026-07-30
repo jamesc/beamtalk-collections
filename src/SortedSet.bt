@@ -1,0 +1,501 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SortedSet — Immutable set of unique elements held in comparator order.
+///
+/// Core `Set` is an unordered collection of unique values. `SortedSet` fills
+/// the `gb_sets` role instead: it keeps its elements ordered, so it can offer
+/// ordered iteration, range scans, and nearest-neighbour queries (`min`,
+/// `max`, `floor:`, `ceiling:`) on top of O(log n) `add:`, `remove:` and
+/// `includes:`. It shares its persistent weight-balanced tree with
+/// `SortedMap` — a set is that map with nothing hanging off the keys. Every
+/// operation returns a new set; the original is unchanged.
+///
+/// ## Ordering
+/// Order is defined by a two-argument comparator block returning a Boolean —
+/// the same convention as `List sort:` — read as "a sorts at or before b".
+/// The default is ascending natural order, `[:a :b | a <= b]`. Uniqueness is
+/// decided by that same comparator, not by `=:=`: two elements that compare
+/// at-or-before each other in both directions are the same element, so
+/// `SortedSet sortedBy: [:a :b | a size <= b size]` holds at most one string
+/// of each length.
+///
+/// ## Comparator identity
+/// **The comparator is part of a set's identity.** `union:`, `intersection:`
+/// and `difference:` would silently mis-order their result if the two sets
+/// disagreed about ordering, so they first check that both sets were built
+/// with the same comparator and raise an error otherwise. Sameness is block
+/// identity: every set built with `new` / `withAll:` shares the default
+/// ordering and combines freely, while a set built with `sortedBy:` only
+/// combines with sets built from *that same block value*.
+///
+/// The known limitation of that rule: two separately written but textually
+/// identical block literals are different values, so
+/// `SortedSet sortedBy: [:a :b | a >= b]` written twice yields two sets that
+/// refuse to combine. Bind the comparator to a variable and pass that same
+/// variable to each `sortedBy:` when several interoperable sets are needed.
+/// Erring towards refusing a legitimate union is deliberate — the alternative
+/// is silently producing a mis-ordered set.
+///
+/// ## Examples
+/// ```beamtalk
+/// s := SortedSet withAll: #(5, 1, 3, 1)
+/// s size                                  // => 3
+/// s asList                                // => #(1, 3, 5)
+/// s min                                   // => 1
+/// s ceiling: 2                            // => 3
+/// (s from: 2 to: 5) asList                // => #(3, 5)
+/// ```
+typed Collection(E) subclass: SortedSet(E)
+  field: root :: SortedTreeNode(E, Boolean) | Nil = nil
+  field: comparator :: Block(E, E, Boolean) | Nil = nil
+
+  // === Construction ===
+
+  /// The ordering used when none is given: ascending natural order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet defaultComparator value: 1 value: 2   // => true
+  /// ```
+  @expect type
+  class defaultComparator -> Block(E, E, Boolean) => [:a :b | a <= b]
+
+  /// Create an empty set ordered by `comparator`, a `Block(E, E, Boolean)`
+  /// answering true when its first argument sorts at or before its second.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet sortedBy: [:a :b | a >= b]) add: 1) add: 3   // => a SortedSet ordered 3, 1
+  /// ```
+  class sortedBy: comparator :: Block(E, E, Boolean) -> SortedSet(E) =>
+    SortedSet new: #{#comparator => comparator}
+
+  /// Create a set in default order holding every element of `elements`,
+  /// discarding duplicates.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1, 3)) asList   // => #(1, 3)
+  /// ```
+  @expect type
+  class withAll: elements :: Collection -> SortedSet(E) =>
+    elements inject: SortedSet new into: [:acc :each | acc add: each]
+
+  /// Create a set ordered by `comparator` holding every element of
+  /// `elements`, discarding elements the comparator treats as duplicates.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet sortedBy: [:a :b | a >= b] withAll: #(1, 3)) asList   // => #(3, 1)
+  /// ```
+  @expect type
+  class sortedBy: comparator :: Block(E, E, Boolean) withAll: elements :: Collection -> SortedSet(E) =>
+    empty := self sortedBy: comparator
+    elements inject: empty into: [:acc :each | acc add: each]
+
+  /// The comparator block actually in force. A `nil` in the `comparator`
+  /// field means "default ordering"; storing `nil` rather than a block is what
+  /// lets two independently built default-ordered structures recognise each
+  /// other as compatible.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new comparator value: 1 value: 2   // => true
+  /// ```
+  @expect type
+  comparator -> Block(E, E, Boolean) =>
+    self.comparator isNil ifTrue: [[:a :b | a <= b]] ifFalse: [self.comparator]
+
+  /// This set's ordering *identity* — `nil` for the default order, otherwise
+  /// the comparator block itself. Named to match `PriorityQueue>>ordering`.
+  ///
+  /// Distinct from `comparator`, which resolves `nil` to a usable block: two
+  /// separately built default-ordered sets must compare equal here, and two
+  /// freshly resolved default blocks would not.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new ordering   // => nil
+  /// ```
+  ordering -> Object => self.comparator
+
+  /// The backing tree, resolving the stored `nil` placeholder to the empty
+  /// tree sentinel.
+  internal tree -> SortedTreeNode(E, Boolean) =>
+    self.root isNil ifTrue: [SortedTreeNode new] ifFalse: [self.root]
+
+  /// A set with the same ordering as the receiver but a different tree.
+  internal withRoot: newRoot :: SortedTreeNode(E, Boolean) | Nil -> SortedSet(E) =>
+    SortedSet new: #{#root => newRoot, #comparator => self.comparator}
+
+  /// Raise unless `other` is ordered by the same comparator as the receiver.
+  ///
+  /// Compares ordering *identity*, not the resolved blocks — see `ordering`.
+  internal assertSameOrderingAs: other :: SortedSet(E) -> Boolean =>
+    (self ordering =:= other ordering)
+      ifTrue: [true]
+      ifFalse: [
+        self error: "SortedSet: comparator mismatch — both sets must be ordered by the same comparator block"
+      ]
+
+  // === Size ===
+
+  /// Number of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 2, 2)) size   // => 2
+  /// SortedSet new size                     // => 0
+  /// ```
+  size -> Integer => self tree weight
+
+  /// Test whether the set holds no elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new isEmpty              // => true
+  /// (SortedSet new add: 1) isEmpty     // => false
+  /// ```
+  isEmpty -> Boolean => self tree isEmptyNode
+
+  // === Membership ===
+
+  /// Test whether any element compares equal to `element`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 2)) includes: 1   // => true
+  /// (SortedSet withAll: #(1, 2)) includes: 9   // => false
+  /// ```
+  includes: element :: E -> Boolean =>
+    self tree containsKey: element using: self comparator
+
+  /// Set with `element` added; unchanged when an equal element is present.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet new add: 1) size            // => 1
+  /// ((SortedSet new add: 1) add: 1) size   // => 1
+  /// ```
+  add: element :: E -> SortedSet(E) =>
+    self
+      withRoot: (self tree
+        insert: element
+        val: true
+        using: self comparator)
+
+  /// Set with `element` removed; unchanged when it is absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet new add: 1) remove: 1) isEmpty   // => true
+  /// (SortedSet new remove: 1) isEmpty            // => true
+  /// ```
+  remove: element :: E -> SortedSet(E) =>
+    self withRoot: (self tree delete: element using: self comparator)
+
+  // === Ordered traversal ===
+
+  /// Iterate over the elements in ascending comparator order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(2, 1)) do: [:e | Transcript show: e]
+  /// ```
+  do: block :: Block(E, Object) -> Nil =>
+    self tree foldAcc: nil block: [:_acc :k :_v | block value: k]
+    nil
+
+  // === Ends ===
+
+  /// Smallest element. Raises an error when the set is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) min   // => 1
+  /// ```
+  min -> E =>
+    self isEmpty ifTrue: [self error: "SortedSet min: set is empty"]
+    self tree minNode key
+
+  /// Largest element. Raises an error when the set is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) max   // => 3
+  /// ```
+  max -> E =>
+    self isEmpty ifTrue: [self error: "SortedSet max: set is empty"]
+    self tree maxNode key
+
+  /// Smallest element — the first one `do:` visits. Alias of `min`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) first   // => 1
+  /// ```
+  first -> E => self min
+
+  /// Largest element — the last one `do:` visits. Alias of `max`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) last   // => 3
+  /// ```
+  last -> E => self max
+
+  /// Smallest element, or `emptyBlock`'s value when the set is empty.
+  ///
+  /// The non-raising counterpart of `min`, mirroring `at:ifAbsent:` and
+  /// `Deque>>firstIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) minIfEmpty: [0]   // => 1
+  /// SortedSet new minIfEmpty: [0]                  // => 0
+  /// ```
+  minIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree minNode key
+
+  /// Largest element, or `emptyBlock`'s value when the set is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1)) maxIfEmpty: [0]   // => 3
+  /// SortedSet new maxIfEmpty: [0]                  // => 0
+  /// ```
+  maxIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self isEmpty ifTrue: [^emptyBlock value]
+    self tree maxNode key
+
+  /// Smallest element, or `emptyBlock`'s value when empty. Alias of
+  /// `minIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new firstIfEmpty: [#none]   // => #none
+  /// ```
+  firstIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self minIfEmpty: emptyBlock
+
+  /// Largest element, or `emptyBlock`'s value when empty. Alias of
+  /// `maxIfEmpty:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new lastIfEmpty: [#none]   // => #none
+  /// ```
+  lastIfEmpty: emptyBlock :: Block(Object) -> E | Object =>
+    self maxIfEmpty: emptyBlock
+
+  // === Nearest neighbours ===
+
+  /// Greatest element that sorts at or before `element`. Raises an error when
+  /// every element sorts after it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 5)) floor: 3   // => 1
+  /// (SortedSet withAll: #(1, 5)) floor: 5   // => 5
+  /// ```
+  floor: element :: E -> E =>
+    self floor: element ifAbsent: [
+      self error: "SortedSet floor: no element sorts at or before the given one"
+    ]
+
+  /// Greatest element that sorts at or before `element`, or the result of
+  /// `absentBlock` when every element sorts after it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(5)) floor: 1 ifAbsent: [#none]   // => #none
+  /// ```
+  floor: element :: E ifAbsent: absentBlock :: Block(Object) -> E | Object =>
+    found := self tree
+      floorNodeFor: element
+      using: self comparator
+      best: nil
+    found isNil ifTrue: [absentBlock value] ifFalse: [found key]
+
+  /// Least element that sorts at or after `element`. Raises an error when
+  /// every element sorts before it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 5)) ceiling: 3   // => 5
+  /// (SortedSet withAll: #(1, 5)) ceiling: 1   // => 1
+  /// ```
+  ceiling: element :: E -> E =>
+    self ceiling: element ifAbsent: [
+      self error: "SortedSet ceiling: no element sorts at or after the given one"
+    ]
+
+  /// Least element that sorts at or after `element`, or the result of
+  /// `absentBlock` when every element sorts before it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1)) ceiling: 5 ifAbsent: [#none]   // => #none
+  /// ```
+  ceiling: element :: E ifAbsent: absentBlock :: Block(Object) -> E | Object =>
+    found := self tree
+      ceilingNodeFor: element
+      using: self comparator
+      best: nil
+    found isNil ifTrue: [absentBlock value] ifFalse: [found key]
+
+  // === Range scans ===
+
+  /// Subset of every element sorting within `[low, high]` inclusive, keeping
+  /// the receiver's ordering. Neither bound has to be a member.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 3, 5)) from: 2 to: 5) asList   // => #(3, 5)
+  /// ```
+  from: low :: E to: high :: E -> SortedSet(E) =>
+    empty := self withRoot: nil
+    self tree
+      foldRangeFrom: low
+      to: high
+      using: self comparator
+      acc: empty
+      block: [:acc :k :_v | acc add: k]
+
+  /// Streaming form of `from:to:` — evaluate `block` with each element of the
+  /// inclusive range, in ascending order, building nothing.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 3)) from: 1 to: 9 do: [:e | Transcript show: e]
+  /// ```
+  from: low :: E to: high :: E do: block :: Block(E, Object) -> Nil =>
+    self tree
+      foldRangeFrom: low
+      to: high
+      using: self comparator
+      acc: nil
+      block: [:_acc :k :_v | block value: k]
+    nil
+
+  // === Set algebra ===
+
+  /// Set holding every element of the receiver and of `other`.
+  ///
+  /// Raises an error when the two sets are ordered by different comparators.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2)) union: (SortedSet withAll: #(2, 3))) asList
+  ///   // => #(1, 2, 3)
+  /// ```
+  union: other :: SortedSet(E) -> SortedSet(E) =>
+    self assertSameOrderingAs: other
+    other inject: self into: [:acc :each | acc add: each]
+
+  /// Set holding only the elements present in both the receiver and `other`.
+  ///
+  /// Raises an error when the two sets are ordered by different comparators.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2)) intersection: (SortedSet withAll: #(2, 3))) asList
+  ///   // => #(2)
+  /// ```
+  intersection: other :: SortedSet(E) -> SortedSet(E) =>
+    self assertSameOrderingAs: other
+    self inject: (self withRoot: nil) into: [:acc :each |
+      (other includes: each) ifTrue: [acc add: each] ifFalse: [acc]
+    ]
+
+  /// Set holding the elements of the receiver that are not in `other`.
+  ///
+  /// Raises an error when the two sets are ordered by different comparators.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2)) difference: (SortedSet withAll: #(2, 3))) asList
+  ///   // => #(1)
+  /// ```
+  difference: other :: SortedSet(E) -> SortedSet(E) =>
+    self assertSameOrderingAs: other
+    self inject: (self withRoot: nil) into: [:acc :each |
+      (other includes: each) ifTrue: [acc] ifFalse: [acc add: each]
+    ]
+
+  // === Derived collections ===
+
+  /// Map `block` over every element, returning a `SortedSet` that keeps the
+  /// receiver's ordering.
+  ///
+  /// Overrides `Collection>>collect:`, which rebuilds through
+  /// `self species withAll:` — a class-side constructor that cannot see this
+  /// set's `comparator` field, so a custom-ordered set would silently come
+  /// back in natural order.
+  ///
+  /// The comparator is preserved even though `block` maps `E -> R` and an
+  /// ordering written against `E` need not be meaningful for `R`. That is
+  /// deliberate: the caller explicitly chose this ordering, and failing
+  /// loudly on an incompatible element beats quietly reverting to natural
+  /// order. Pair `collect:` with `SortedSet sortedBy:withAll:` when the
+  /// result needs a different ordering.
+  ///
+  /// Note that `block` may map two distinct elements onto the same result, so
+  /// the result can be smaller than the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2)) collect: [:e | e * 10]) asList   // => #(10, 20)
+  /// ```
+  collect: block :: Block(E, R) -> SortedSet(R) =>
+    empty := self withRoot: nil
+    self inject: empty into: [:acc :each | acc add: (block value: each)]
+
+  /// Select the elements satisfying `block`, keeping the receiver's ordering.
+  ///
+  /// Overridden for the same reason as `collect:`. `Collection>>reject:` is
+  /// pure delegation to `select:`, so it inherits the fix and needs no
+  /// override of its own.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedSet withAll: #(1, 2, 3)) select: [:e | e > 1]) asList   // => #(2, 3)
+  /// ((SortedSet withAll: #(1, 2, 3)) reject: [:e | e > 1]) asList   // => #(1)
+  /// ```
+  select: block :: Block(E, Boolean) -> SortedSet(E) =>
+    empty := self withRoot: nil
+    self inject: empty into: [:acc :each |
+      (block value: each) ifTrue: [acc add: each] ifFalse: [acc]
+    ]
+
+  // === Conversions ===
+
+  /// Elements as a `List`, in ascending comparator order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(3, 1, 2)) asList   // => #(1, 2, 3)
+  /// ```
+  asList -> List(E) =>
+    (self tree foldAcc: #() block: [:acc :k :_v | acc addFirst: k]) reversed
+
+  /// Hand the elements back to core as an unordered `Set`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedSet withAll: #(1, 2)) asSet size   // => 2
+  /// ```
+  asSet -> Set(E) => Set withAll: self asList
+
+  /// A `SortedSet` is already a `SortedSet`.
+  asSortedSet -> SortedSet(E) => self
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SortedSet new printString   // => "SortedSet(0)"
+  /// ```
+  printString -> String => "SortedSet(" ++ self size printString ++ ")"

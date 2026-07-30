@@ -1,0 +1,430 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for collections@SortedMap — the ordered, balanced-tree key-value map.
+
+TestCase subclass: SortedMapTest
+
+  // === Helpers ===
+
+  // Map holding 1 -> "a", 3 -> "c", 5 -> "e", built out of insertion order.
+  internal sample =>
+    m := SortedMap new
+    m := m at: 5 put: "e"
+    m := m at: 1 put: "a"
+    m := m at: 3 put: "c"
+    m
+
+  // First key `keysAndValuesDo:` visits, or nil for an empty map. Exercises
+  // the ordered-traversal callback without needing block mutation.
+  internal firstKeyVisitedIn: aMap =>
+    aMap keysAndValuesDo: [:k :_v | ^k]
+    nil
+
+  // First key `from:to:do:` visits in the given range, or nil when the range
+  // holds no keys.
+  internal firstKeyIn: aMap from: low to: high =>
+    aMap
+      from: low
+      to: high
+      do: [:k :_v | ^k]
+    nil
+
+  // === Construction and size ===
+  testNewIsEmpty =>
+    self assert: SortedMap new size equals: 0
+    self assert: SortedMap new isEmpty equals: true
+    self assert: SortedMap new isNotEmpty equals: false
+
+  testSizeAndIsEmptyAfterInsert =>
+    self assert: self sample size equals: 3
+    self assert: self sample isEmpty equals: false
+
+  testWithAllFromDictionary =>
+    m := SortedMap withAll: #{3 => "c", 1 => "a", 2 => "b"}
+    self assert: m size equals: 3
+    self assert: m keys equals: #(1, 2, 3)
+    self assert: m values equals: #("a", "b", "c")
+
+  testWithAllFromPairList =>
+    m := SortedMap withAll: #(#(3, "c"), #(1, "a"))
+    self assert: m keys equals: #(1, 3)
+    self assert: (m at: 3) equals: "c"
+
+  testWithAllFromSortedMap =>
+    m := SortedMap withAll: self sample
+    self assert: m keys equals: #(1, 3, 5)
+
+  testSortedByWithAll =>
+    m := SortedMap sortedBy: [:a :b | a >= b] withAll: #{1 => "a", 2 => "b"}
+    self assert: m keys equals: #(2, 1)
+
+  testPrintString =>
+    self assert: SortedMap new printString equals: "SortedMap(0)"
+    self assert: self sample printString equals: "SortedMap(3)"
+
+  // === Lookup ===
+  testAt => self assert: (self sample at: 3) equals: "c"
+
+  testAtIfAbsent =>
+    self assert: (self sample at: 3 ifAbsent: [#missing]) equals: "c"
+    self assert: (self sample at: 4 ifAbsent: [#missing]) equals: #missing
+    self assert: (SortedMap new at: 1 ifAbsent: [#missing]) equals: #missing
+
+  testAtMissingKeyRaises => self should: [self sample at: 4] raise: #user_error
+
+  testAtOnEmptyRaises => self should: [SortedMap new at: 1] raise: #user_error
+
+  testIncludesKey =>
+    self assert: (self sample includesKey: 1) equals: true
+    self assert: (self sample includesKey: 2) equals: false
+    self assert: (SortedMap new includesKey: 1) equals: false
+
+  // === Update ===
+  testAtPutReturnsNewMap =>
+    original := self sample
+    updated := original at: 7 put: "g"
+    self assert: updated size equals: 4
+    self assert: original size equals: 3
+    self assert: (original includesKey: 7) equals: false
+
+  testAtPutReplacesExistingKey =>
+    m := self sample at: 3 put: "C"
+    self assert: m size equals: 3
+    self assert: (m at: 3) equals: "C"
+
+  testRemoveKey =>
+    m := self sample removeKey: 3
+    self assert: m size equals: 2
+    self assert: m keys equals: #(1, 5)
+    self assert: (m includesKey: 3) equals: false
+
+  testRemoveMissingKeyIsANoOp =>
+    self assert: (self sample removeKey: 4) size equals: 3
+    self assert: (SortedMap new removeKey: 4) isEmpty equals: true
+
+  testRemoveEveryKeyEmptiesTheMap =>
+    m := #(1, 3, 5) inject: self sample into: [:acc :k | acc removeKey: k]
+    self assert: m isEmpty equals: true
+    self assert: m keys equals: #()
+
+  testMerge =>
+    merged := self sample merge: (SortedMap withAll: #(#(2, "b"), #(3, "C")))
+    self assert: merged keys equals: #(1, 2, 3, 5)
+    self assert: (merged at: 3) equals: "C"
+
+  testMergeRejectsMismatchedComparator =>
+    descending := SortedMap sortedBy: [:a :b | a >= b]
+    self should: [self sample merge: descending] raise: #user_error
+
+  testMergeAcceptsTwoDefaultOrderedMaps =>
+    merged := (SortedMap withAll: #(#(1, "a"))) merge: (SortedMap withAll: #(#(2, "b")))
+    self assert: merged keys equals: #(1, 2)
+
+  // === Ordered traversal ===
+  testKeysAreOrdered =>
+    self assert: self sample keys equals: #(1, 3, 5)
+    self assert: SortedMap new keys equals: #()
+
+  testValuesFollowKeyOrder =>
+    self assert: self sample values equals: #("a", "c", "e")
+    self assert: SortedMap new values equals: #()
+
+  testDoIteratesValuesInKeyOrder =>
+    // `asList` and `inject:into:` are both built on `do:`.
+    self assert: self sample asList equals: #("a", "c", "e")
+    self assert: (self sample inject: "" into: [:acc :v |
+      acc ++ v
+    ]) equals: "ace"
+
+  testKeysAndValuesDoStartsAtTheSmallestKey =>
+    self assert: (self firstKeyVisitedIn: self sample) equals: 1
+    self assert: (self firstKeyVisitedIn: SortedMap new) equals: nil
+
+  testKeysAndValuesDoReachesTheLastPair =>
+    // The block raises on the largest key; the raise escaping proves the
+    // traversal ran all the way to the end rather than stopping early.
+    self
+      should: [
+        self sample keysAndValuesDo: [:k :_v |
+          k =:= 5 ifTrue: [self error: "visited 5"]
+        ]
+      ]
+      raise: #user_error
+
+  testKeysAndValuesDoPairsEachKeyWithItsValue =>
+    self
+      should: [
+        self sample keysAndValuesDo: [:k :v |
+          (k =:= 3 and: [v =:= "c"]) ifTrue: [self error: "3 is bound to c"]
+        ]
+      ]
+      raise: #user_error
+
+  // === Species-based derivations keep the comparator ===
+  //
+  // `Collection>>collect:` and `select:` rebuild through
+  // `self species withAll:`, a class-side constructor that cannot see the
+  // receiver's `comparator` field. Each test below builds a descending map,
+  // derives from it, and asserts (a) the result is still descending rather
+  // than natural order and (b) it still merges with the original, which
+  // proves the comparator *value* carried through, not just the ordering.
+  internal descendingSample =>
+    SortedMap sortedBy: [:a :b |
+      a >= b
+    ] withAll: #(#(1, 10), #(2, 20), #(3, 30))
+
+  testCollectKeepsComparator =>
+    original := self descendingSample
+    derived := original collect: [:v | v * 2]
+    self assert: derived keys equals: #(3, 2, 1)
+    self assert: derived values equals: #(60, 40, 20)
+    self assert: (derived merge: original) keys equals: #(3, 2, 1)
+
+  testSelectKeepsComparator =>
+    original := self descendingSample
+    derived := original select: [:v | v > 10]
+    self assert: derived keys equals: #(3, 2)
+    self assert: derived values equals: #(30, 20)
+    self assert: (derived merge: original) keys equals: #(3, 2, 1)
+
+  testRejectKeepsComparator =>
+    // `Collection>>reject:` is pure delegation to `select:`, so overriding
+    // `select:` is what fixes it.
+    original := self descendingSample
+    derived := original reject: [:v | v > 10]
+    self assert: derived keys equals: #(1)
+    self assert: (derived merge: original) keys equals: #(3, 2, 1)
+
+  testDefaultOrderedDerivationsStayMergeable =>
+    original := self sample
+    self assert: ((original select: [:v |
+      v /= "c"
+    ]) merge: original) keys equals: #(1, 3, 5)
+
+  testSelectAndRejectPartitionTheMap =>
+    self assert: (self sample select: [:v | v =:= "c"]) keys equals: #(3)
+    self assert: (self sample reject: [:v | v =:= "c"]) keys equals: #(1, 5)
+
+  testCollectKeepsKeysAndOrder =>
+    m := (SortedMap withAll: #(#(2, 20), #(1, 10))) collect: [:v | v * 2]
+    self assert: m keys equals: #(1, 2)
+    self assert: m values equals: #(20, 40)
+
+  testAsDictionary =>
+    d := self sample asDictionary
+    self assert: d size equals: 3
+    self assert: (d at: 3) equals: "c"
+
+  testAsSortedMapIsIdentity =>
+    self assert: self sample asSortedMap keys equals: #(1, 3, 5)
+
+  // === Ends ===
+  testMinMaxFirstLast =>
+    self assert: self sample min equals: 1
+    self assert: self sample max equals: 5
+    self assert: self sample first equals: "a"
+    self assert: self sample last equals: "e"
+
+  testSingletonEnds =>
+    m := SortedMap new at: 7 put: "g"
+    self assert: m min equals: 7
+    self assert: m max equals: 7
+    self assert: m first equals: "g"
+    self assert: m last equals: "g"
+
+  testEmptyMinRaises => self should: [SortedMap new min] raise: #user_error
+
+  testEmptyMaxRaises => self should: [SortedMap new max] raise: #user_error
+
+  testEmptyFirstRaises => self should: [SortedMap new first] raise: #user_error
+
+  testEmptyLastRaises => self should: [SortedMap new last] raise: #user_error
+
+  // === floor: / ceiling: ===
+  testFloorExactHit => self assert: (self sample floor: 3) equals: 3
+
+  testFloorBetweenKeys => self assert: (self sample floor: 4) equals: 3
+
+  testFloorAboveMaxIsTheMax => self assert: (self sample floor: 99) equals: 5
+
+  testFloorBelowMinRaises =>
+    self should: [self sample floor: 0] raise: #user_error
+
+  testFloorOnEmptyRaises =>
+    self should: [SortedMap new floor: 1] raise: #user_error
+
+  testFloorIfAbsent =>
+    self assert: (self sample floor: 0 ifAbsent: [#none]) equals: #none
+    self assert: (self sample floor: 4 ifAbsent: [#none]) equals: 3
+    self assert: (SortedMap new floor: 1 ifAbsent: [#none]) equals: #none
+
+  testCeilingExactHit => self assert: (self sample ceiling: 3) equals: 3
+
+  testCeilingBetweenKeys => self assert: (self sample ceiling: 4) equals: 5
+
+  testCeilingBelowMinIsTheMin => self assert: (self sample ceiling: 0) equals: 1
+
+  testCeilingAboveMaxRaises =>
+    self should: [self sample ceiling: 99] raise: #user_error
+
+  testCeilingOnEmptyRaises =>
+    self should: [SortedMap new ceiling: 1] raise: #user_error
+
+  testCeilingIfAbsent =>
+    self assert: (self sample ceiling: 99 ifAbsent: [#none]) equals: #none
+    self assert: (self sample ceiling: 4 ifAbsent: [#none]) equals: 5
+    self assert: (SortedMap new ceiling: 1 ifAbsent: [#none]) equals: #none
+
+  // === Range scans ===
+  testFromToIsInclusiveOfBothBounds =>
+    self assert: ((self sample from: 1 to: 5) keys) equals: #(1, 3, 5)
+    self assert: ((self sample from: 1 to: 3) keys) equals: #(1, 3)
+
+  testFromToAcceptsBoundsThatAreNotKeys =>
+    self assert: ((self sample from: 2 to: 4) keys) equals: #(3)
+    self assert: ((self sample from: 0 to: 99) keys) equals: #(1, 3, 5)
+
+  testFromToEmptyRange =>
+    self assert: ((self sample from: 6 to: 9) isEmpty) equals: true
+    self assert: ((self sample from: 5 to: 1) isEmpty) equals: true
+
+  testFromToReturnsASortedMapWithTheValues =>
+    sub := self sample from: 3 to: 5
+    self assert: sub class name equals: #SortedMap
+    self assert: sub values equals: #("c", "e")
+
+  testFromToKeepsACustomComparator =>
+    m := SortedMap sortedBy: [:a :b |
+      a >= b
+    ] withAll: #(#(1, "a"), #(3, "c"), #(5, "e"))
+    // Descending order, so the range runs from the larger bound down.
+    self assert: ((m from: 5 to: 1) keys) equals: #(5, 3, 1)
+
+  testFromToDoStartsAtTheFirstKeyInRange =>
+    self
+      assert: (self
+        firstKeyIn: self sample
+        from: 2
+        to: 5)
+      equals: 3
+    self
+      assert: (self
+        firstKeyIn: self sample
+        from: 0
+        to: 9)
+      equals: 1
+    self
+      assert: (self
+        firstKeyIn: self sample
+        from: 6
+        to: 9)
+      equals: nil
+
+  testFromToDoReachesTheUpperBoundInclusively =>
+    self
+      should: [
+        self sample
+          from: 2
+          to: 5
+          do: [:k :_v | k =:= 5 ifTrue: [self error: "visited 5"]]
+      ]
+      raise: #user_error
+
+  testFromToDoSkipsKeysOutsideTheRange =>
+    // Raising on key 1 would fail this test — it sorts below the range.
+    self sample
+      from: 2
+      to: 5
+      do: [:k :_v | k =:= 1 ifTrue: [self error: "visited 1"]]
+    self
+      assert: (self
+        firstKeyIn: self sample
+        from: 2
+        to: 5)
+      equals: 3
+
+  // === Custom comparators ===
+  testDescendingComparator =>
+    m := SortedMap sortedBy: [:a :b | a >= b]
+    m := m at: 1 put: "a"
+    m := m at: 5 put: "e"
+    m := m at: 3 put: "c"
+    self assert: m keys equals: #(5, 3, 1)
+    self assert: m min equals: 5
+    self assert: m max equals: 1
+    self assert: m first equals: "e"
+
+  testComparatorDecidesKeyIdentity =>
+    // Ordered by string length, so "ab" and "cd" are the same key.
+    m := SortedMap sortedBy: [:a :b | a size <= b size]
+    m := m at: "ab" put: 1
+    m := m at: "cd" put: 2
+    self assert: m size equals: 1
+    self assert: (m at: "zz") equals: 2
+
+  testComparatorOrdersByDerivedValue =>
+    m := SortedMap sortedBy: [:a :b | a size <= b size]
+    m := m at: "ccc" put: 3
+    m := m at: "a" put: 1
+    m := m at: "bb" put: 2
+    self assert: m values equals: #(1, 2, 3)
+    self assert: (m floor: "xx") equals: "bb"
+
+  // === Balance ===
+  testAscendingInsertionStaysOrdered =>
+    // 1..500 inserted in ascending order — the degenerate case that turns an
+    // unbalanced BST into a linked list.
+    m := (1 to: 500) inject: SortedMap new into: [:acc :i |
+      acc at: i put: i * 10
+    ]
+    self assert: m size equals: 500
+    self assert: m keys equals: (1 to: 500) asList
+    self assert: m min equals: 1
+    self assert: m max equals: 500
+    self assert: (m at: 250) equals: 2500
+    self assert: (m floor: 499) equals: 499
+    self assert: (m ceiling: 1) equals: 1
+
+  testAscendingInsertionStaysBalanced =>
+    m := (1 to: 500) inject: SortedMap new into: [:acc :i | acc at: i put: i]
+    // A degenerate (unbalanced) tree would be 500 deep; log2(500) is under 9,
+    // and a weight-balanced tree with delta = 3 stays comfortably below 20.
+    self assert: (m root depth < 20) equals: true
+
+  testDescendingInsertionStaysBalanced =>
+    m := (1 to: 500) inject: SortedMap new into: [:acc :i |
+      acc at: 501 - i put: i
+    ]
+    self assert: m size equals: 500
+    self assert: m keys equals: (1 to: 500) asList
+    self assert: (m root depth < 20) equals: true
+
+  testDeletionKeepsOrderAndBalance =>
+    full := (1 to: 300) inject: SortedMap new into: [:acc :i | acc at: i put: i]
+    pruned := (1 to: 150) inject: full into: [:acc :i | acc removeKey: i * 2]
+    self assert: pruned size equals: 150
+    self assert: pruned keys equals: ((1 to: 300) select: [:i | i isOdd]) asList
+    self assert: (pruned root depth < 20) equals: true
+    self assert: pruned min equals: 1
+    self assert: pruned max equals: 299
+
+  // === Non-raising empty accessors ===
+  testMinMaxIfEmptyOnPopulatedMapIgnoresBlock =>
+    m := (SortedMap new at: 2 put: "b") at: 1 put: "a"
+    self assert: (m minIfEmpty: [0]) equals: 1
+    self assert: (m maxIfEmpty: [0]) equals: 2
+    self assert: (m firstIfEmpty: [""]) equals: "a"
+    self assert: (m lastIfEmpty: [""]) equals: "b"
+
+  testMinMaxIfEmptyOnEmptyMapTakesBlock =>
+    m := SortedMap new
+    self assert: (m minIfEmpty: [0]) equals: 0
+    self assert: (m maxIfEmpty: [#none]) equals: #none
+    self assert: (m firstIfEmpty: [nil]) equals: nil
+    self assert: (m lastIfEmpty: [#gone]) equals: #gone
+
+  testOrderingIdentityAccessor =>
+    self assert: SortedMap new ordering equals: nil
+    blk := [:a :b | a >= b]
+    self assert: ((SortedMap sortedBy: blk) ordering =:= blk) equals: true
