@@ -167,6 +167,7 @@ TestCase subclass: EqualityTest
     b := PriorityQueue withAll: #((Tuple withAll: #(1.0)), (Tuple withAll: #(1)))
     self deny: (a asList sort =:= b asList sort)
     self assert: (a equals: b)
+    self assert: (b equals: a)
 
   // The fallback must stay exact, not merely lenient: these are genuinely
   // different multisets that the arithmetic sort cannot tell apart by value.
