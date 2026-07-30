@@ -20,6 +20,21 @@
 /// access to both ends, or `reversed` (which is O(1) here — it just swaps the
 /// two Lists).
 ///
+/// ## Equality
+///
+/// Compare two Deques with `equals:`, never with `=:=`. A Deque's front/rear
+/// split depends on how it was built, so two Deques holding the same sequence
+/// are `=:=`-unequal whenever their split differs — see the library's
+/// "Equality" section in the README for the full rationale.
+///
+/// ```beamtalk
+/// a := #(1, 2) inject: Deque new into: [:acc :x | acc addFirst: x]
+/// b := Deque withAll: #(2, 1)
+/// a asList                                           // => #(2, 1)
+/// b asList                                           // => #(2, 1)
+/// a equals: b                                        // => true
+/// ```
+///
 /// Element and remainder are separate accessors — `first`/`removeFirst` and
 /// `last`/`removeLast`, mirroring `List first` / `List rest` — rather than one
 /// message answering a pair. Nothing is lost by splitting them: the Deque is
@@ -272,6 +287,36 @@ typed Collection(E) subclass: Deque(E)
   /// (Deque withAll: #(1, 2, 3)) printString   // => "Deque(3)"
   /// ```
   printString -> String => "Deque(" ++ self.count printString ++ ")"
+
+  // === Equality ===
+
+  /// Test whether `other` is a Deque holding the same sequence of elements.
+  ///
+  /// O(n). This is the supported way to compare two Deques. **`=:=` is not** —
+  /// it is Erlang term equality on the raw front/rear split, which encodes
+  /// *how* a Deque was built rather than what it holds, so it answers `false`
+  /// for two Deques carrying an identical sequence but built by different
+  /// routes. `equals:` normalises through `asList` first, so it depends only
+  /// on the logical sequence.
+  ///
+  /// Elements themselves are compared with `=:=`, so `1` and `1.0` are
+  /// different elements here just as they are everywhere else in Beamtalk.
+  ///
+  /// The same caveat applies wherever the runtime compares terms directly and
+  /// `equals:` cannot be reached: `Set` membership, `Dictionary` keys, and
+  /// BUnit's `assert:equals:` all use `=:=`. Write
+  /// `self assert: (a equals: b)` rather than `self assert: a equals: b`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Deque withAll: #(1, 2)) equals: (Deque withAll: #(1, 2))   // => true
+  /// (Deque withAll: #(1, 2)) equals: (Deque withAll: #(2, 1))   // => false
+  /// (Deque withAll: #(1, 2)) equals: #(1, 2)                    // => false
+  /// Deque new equals: Deque new                                 // => true
+  /// ```
+  equals: other :: Object -> Boolean =>
+    (other isKindOf: Deque) ifFalse: [^false]
+    (self.count =:= other size) and: [self asList =:= other asList]
 
   // === Internal ===
 

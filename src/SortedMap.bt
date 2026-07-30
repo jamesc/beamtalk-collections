@@ -34,6 +34,20 @@
 /// Erring towards refusing a legitimate merge is deliberate — the alternative
 /// is silently producing a mis-ordered map.
 ///
+/// ## Equality
+/// Compare two maps with `equals:`, never with `=:=`. The backing tree's shape
+/// depends on the order pairs were inserted in, so two maps holding the same
+/// bindings are `=:=`-unequal whenever they were built differently — see the
+/// library's "Equality" section in the README.
+///
+/// ```beamtalk
+/// a := SortedMap withAll: #(#(1, "a"), #(2, "b"))
+/// b := SortedMap withAll: #(#(2, "b"), #(1, "a"))
+/// a keys                                        // => #(1, 2)
+/// b keys                                        // => #(1, 2)
+/// a equals: b                                   // => true
+/// ```
+///
 /// ## Examples
 /// ```beamtalk
 /// m := SortedMap new
@@ -540,3 +554,38 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// SortedMap new printString   // => "SortedMap(0)"
   /// ```
   printString -> String => "SortedMap(" ++ self size printString ++ ")"
+
+  // === Equality ===
+
+  /// Test whether `other` is a SortedMap with the same ordering holding the
+  /// same bindings.
+  ///
+  /// O(n). This is the supported way to compare two maps. **`=:=` is not** —
+  /// it is Erlang term equality on the raw weight-balanced tree, whose shape
+  /// records insertion order rather than which bindings are present, so it
+  /// answers `false` for two maps holding the same pairs but built by
+  /// different routes. `equals:` normalises through `keys` and `values` — both
+  /// in-order traversals, fixed by the contents alone — so it depends only on
+  /// what the map holds.
+  ///
+  /// Two maps are equal when `other` is a SortedMap, the two share an ordering
+  /// identity (`ordering`) — the same check `merge:` makes, so an ascending
+  /// map is never equal to a descending one over the same pairs — and their
+  /// keys and values match pairwise under `=:=`.
+  ///
+  /// The same caveat as elsewhere applies where `equals:` cannot be reached:
+  /// `Set` membership, `Dictionary` keys, and BUnit's `assert:equals:` all use
+  /// `=:=`. Write `self assert: (a equals: b)`, not `self assert: a equals: b`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SortedMap withAll: #(#(1, "a"))) equals: (SortedMap withAll: #(#(1, "a")))   // => true
+  /// (SortedMap withAll: #(#(1, "a"))) equals: (SortedMap withAll: #(#(1, "z")))   // => false
+  /// (SortedMap withAll: #(#(1, "a"))) equals: #{1 => "a"}                         // => false
+  /// SortedMap new equals: SortedMap new                                           // => true
+  /// ```
+  equals: other :: Object -> Boolean =>
+    (other isKindOf: SortedMap) ifFalse: [^false]
+    (self ordering =:= other ordering) ifFalse: [^false]
+    (self size =:= other size) ifFalse: [^false]
+    (self keys =:= other keys) and: [self values =:= other values]

@@ -37,6 +37,21 @@
 /// order. Only the minimum is known to come first. Use `asSortedList` when
 /// you actually want ordered output.
 ///
+/// ## Equality
+///
+/// Compare two queues with `equals:`, never with `=:=`. A pairing heap's shape
+/// depends on the order elements were linked in, so two queues holding the same
+/// elements are `=:=`-unequal whenever they were built differently — see the
+/// library's "Equality" section in the README.
+///
+/// ```beamtalk
+/// a := PriorityQueue withAll: #(1, 2, 3)
+/// b := PriorityQueue withAll: #(3, 2, 1)
+/// a asSortedList                                        // => #(1, 2, 3)
+/// b asSortedList                                        // => #(1, 2, 3)
+/// a equals: b                                           // => true
+/// ```
+///
 /// ## No decrease-key
 ///
 /// There is no `decreaseKey:`, and there cannot be an efficient one here: a
@@ -405,6 +420,50 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// (PriorityQueue withAll: #(1, 2)) printString       // => "PriorityQueue(2)"
   /// ```
   printString -> String => "PriorityQueue(" ++ self.count printString ++ ")"
+
+  // === Equality ===
+
+  /// Test whether `other` is a PriorityQueue with the same ordering token
+  /// holding the same multiset of elements.
+  ///
+  /// O(n log n). This is the supported way to compare two queues. **`=:=` is
+  /// not** — it is Erlang term equality on the raw pairing heap, whose shape
+  /// records the order elements were linked in rather than which elements are
+  /// present, so it answers `false` for two queues holding the same elements
+  /// but built by different routes.
+  ///
+  /// Two queues are equal when all three hold:
+  ///
+  /// * `other` is a PriorityQueue,
+  /// * the two share an ordering token (`ordering`) — the same check `merge:`
+  ///   makes, so a min-heap is never equal to a max-heap over the same
+  ///   elements, and
+  /// * they hold the same elements with the same multiplicities. Duplicates
+  ///   count: `#(1, 1)` and `#(1)` are different queues.
+  ///
+  /// Elements are compared as a *multiset in Erlang term order*, not by
+  /// draining through the comparator. That matters for a comparator that ranks
+  /// two distinct elements as ties — say `[:a :b | a size <= b size]`, under
+  /// which `"ab"` and `"cd"` tie. Drain order between tied elements is decided
+  /// by heap shape, so comparing `asSortedList` would have smuggled the
+  /// representation dependence straight back in. For a comparator that is a
+  /// total order (the default `[:a :b | a <= b]` included) the two agree.
+  ///
+  /// The same caveat as elsewhere applies where `equals:` cannot be reached:
+  /// `Set` membership, `Dictionary` keys, and BUnit's `assert:equals:` all use
+  /// `=:=`. Write `self assert: (a equals: b)`, not `self assert: a equals: b`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (PriorityQueue withAll: #(1, 2)) equals: (PriorityQueue withAll: #(2, 1))  // => true
+  /// (PriorityQueue withAll: #(1, 1)) equals: (PriorityQueue withAll: #(1))     // => false
+  /// (PriorityQueue withAll: #(1, 2)) equals: #(1, 2)                           // => false
+  /// PriorityQueue new equals: PriorityQueue new                                // => true
+  /// ```
+  equals: other :: Object -> Boolean =>
+    (other isKindOf: PriorityQueue) ifFalse: [^false]
+    (self.ordering =:= other ordering) ifFalse: [^false]
+    (self.count =:= other size) and: [self asList sort =:= other asList sort]
 
   // === Internals ===
 
