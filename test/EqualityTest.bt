@@ -176,6 +176,23 @@ TestCase subclass: EqualityTest
     self deny: ((PriorityQueue withAll: #(1)) equals: (PriorityQueue withAll: #(1.0)))
     self deny: ((PriorityQueue withAll: #(1, 1.0)) equals: (PriorityQueue withAll: #(1.0, 1.0)))
 
+  // The class's headline use case: a custom comparator over priority-tagged
+  // entries whose elements have no natural ordering of their own. `Tuple` has
+  // no `<=` method — `respondsTo: #<=` is false — yet `equals:` still works,
+  // because `List>>sort` compiles to `lists:sort/1`, which uses Erlang's total
+  // term order rather than dispatching `<=` as a message. So `equals:` imposes
+  // no ordering requirement on elements beyond what `add:` already needs.
+  testPriorityQueueCustomComparatorOverUnorderedElements =>
+    byCost := [:a :b | (a at: 1) <= (b at: 1)]
+    low := Tuple withAll: #(1, #a)
+    high := Tuple withAll: #(2, #b)
+    self deny: (low respondsTo: #'<=')
+    a := (PriorityQueue sortedBy: byCost) addAll: #(low, high)
+    b := (PriorityQueue sortedBy: byCost) addAll: #(high, low)
+    self assert: (a equals: b)
+    self assert: (b equals: a)
+    self deny: (a equals: ((PriorityQueue sortedBy: byCost) addAll: #(low, low)))
+
   testPriorityQueueNotEqualToOtherTypes =>
     q := PriorityQueue withAll: #(1, 2)
     self deny: (q equals: #(1, 2))
