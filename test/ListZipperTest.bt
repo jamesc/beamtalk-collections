@@ -1,0 +1,238 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for ListZipper — cursor-with-focus into an immutable sequence (BT-3015)
+
+TestCase subclass: ListZipperTest
+
+  // === Construction ===
+  testOnFocusesFirstElement =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: z focus equals: 1
+    self assert: z size equals: 3
+    self assert: z atStart
+
+  testOnClass => self assert: (ListZipper on: #(1)) class equals: ListZipper
+
+  testOnSingleElement =>
+    z := ListZipper on: #(42)
+    self assert: z focus equals: 42
+    self assert: z atStart
+    self assert: z atEnd
+    self assert: z size equals: 1
+
+  testOnEmptyRaises => self should: [ListZipper on: #()] raise: #user_error
+
+  testWithAllIsAliasForOn =>
+    z := ListZipper withAll: #(1, 2, 3)
+    self assert: z focus equals: 1
+    self assert: z asList equals: #(1, 2, 3)
+
+  testWithAllEmptyRaises =>
+    self should: [ListZipper withAll: #()] raise: #user_error
+
+  // === Navigation ===
+  testAtStartAndAtEnd =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: z atStart
+    self deny: z atEnd
+    mid := z right
+    self deny: mid atStart
+    self deny: mid atEnd
+    end := mid right
+    self deny: end atStart
+    self assert: end atEnd
+
+  testRightMovesFocusForward =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: z right focus equals: 2
+    self assert: z right right focus equals: 3
+
+  testLeftMovesFocusBackward =>
+    z := (ListZipper on: #(1, 2, 3)) right right
+    self assert: z left focus equals: 2
+    self assert: z left left focus equals: 1
+
+  testLeftThenRightIsIdentity =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: z right left focus equals: 1
+    self assert: z right left asList equals: #(1, 2, 3)
+
+  testNavigationDoesNotMutateReceiver =>
+    z := ListZipper on: #(1, 2, 3)
+    z right
+    self assert: z focus equals: 1
+    self assert: z atStart
+
+  testLeftAtStartRaises =>
+    self should: [(ListZipper on: #(1, 2, 3)) left] raise: #user_error
+
+  testRightAtEndRaises =>
+    self should: [
+      ((ListZipper on: #(1, 2, 3)) right right) right
+    ] raise: #user_error
+
+  testLeftAtStartRaisesOnSingleElement =>
+    self should: [(ListZipper on: #(1)) left] raise: #user_error
+
+  testRightAtEndRaisesOnSingleElement =>
+    self should: [(ListZipper on: #(1)) right] raise: #user_error
+
+  // === Editing: replace: ===
+  testReplace =>
+    z := (ListZipper on: #(1, 2, 3)) replace: 9
+    self assert: z focus equals: 9
+    self assert: z asList equals: #(9, 2, 3)
+    self assert: z size equals: 3
+
+  testReplaceAtMiddle =>
+    z := (ListZipper on: #(1, 2, 3)) right replace: 9
+    self assert: z asList equals: #(1, 9, 3)
+
+  testReplaceDoesNotMutateReceiver =>
+    z := ListZipper on: #(1, 2, 3)
+    z replace: 9
+    self assert: z focus equals: 1
+    self assert: z asList equals: #(1, 2, 3)
+
+  // === Editing: insertBefore: / insertAfter: ===
+  testInsertBefore =>
+    z := (ListZipper on: #(1, 2)) insertBefore: 9
+    self assert: z asList equals: #(9, 1, 2)
+    self assert: z focus equals: 1
+    self assert: z size equals: 3
+
+  testInsertBeforeAtStart =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: z atStart
+    inserted := z insertBefore: 0
+    self assert: inserted asList equals: #(0, 1, 2, 3)
+    // The new element is now the first one, so the focus is no longer atStart.
+    self deny: inserted atStart
+    self assert: inserted focus equals: 1
+
+  testInsertAfter =>
+    z := (ListZipper on: #(1, 2)) insertAfter: 9
+    self assert: z asList equals: #(1, 9, 2)
+    self assert: z focus equals: 1
+    self assert: z size equals: 3
+
+  testInsertAfterAtEnd =>
+    z := (ListZipper on: #(1, 2, 3)) right right
+    self assert: z atEnd
+    inserted := z insertAfter: 4
+    self assert: inserted asList equals: #(1, 2, 3, 4)
+    // The new element now follows the focus, so it is no longer atEnd.
+    self deny: inserted atEnd
+    self assert: inserted focus equals: 3
+
+  testInsertDoesNotMutateReceiver =>
+    z := ListZipper on: #(1, 2)
+    z insertBefore: 9
+    z insertAfter: 9
+    self assert: z asList equals: #(1, 2)
+    self assert: z size equals: 2
+
+  // === Editing: remove ===
+  testRemoveFromMiddleMovesFocusRight =>
+    z := (ListZipper on: #(1, 2, 3)) right remove
+    self assert: z asList equals: #(1, 3)
+    self assert: z focus equals: 3
+    self assert: z size equals: 2
+
+  testRemoveFromStartMovesFocusRight =>
+    z := (ListZipper on: #(1, 2, 3)) remove
+    self assert: z asList equals: #(2, 3)
+    self assert: z focus equals: 2
+
+  testRemoveLastElementMovesFocusLeft =>
+    z := ((ListZipper on: #(1, 2, 3)) right right) remove
+    self assert: z asList equals: #(1, 2)
+    self assert: z focus equals: 2
+    self assert: z atEnd
+
+  testRemoveOnlyElementRaises =>
+    self should: [(ListZipper on: #(1)) remove] raise: #user_error
+
+  testRemoveDownToOne =>
+    z := (ListZipper on: #(1, 2)) remove
+    self assert: z size equals: 1
+    self assert: z focus equals: 2
+    self should: [z remove] raise: #user_error
+
+  testRemoveDoesNotMutateReceiver =>
+    z := ListZipper on: #(1, 2, 3)
+    z remove
+    self assert: z asList equals: #(1, 2, 3)
+    self assert: z size equals: 3
+
+  // === Round-tripping: on: -> edits -> asList ===
+  testRoundTripNavigateEditNavigate =>
+    z := ListZipper on: #(1, 2, 3, 4)
+    z := z right right
+    self assert: z focus equals: 3
+    z := z replace: 30
+    z := z insertAfter: 35
+    z := z left
+    self assert: z focus equals: 2
+    self assert: z asList equals: #(1, 2, 30, 35, 4)
+
+  testRoundTripBuildViaInsertsAndRemoves =>
+    z := ListZipper on: #(1)
+    z := z insertAfter: 2
+    z := z insertAfter: 3
+    self assert: z asList equals: #(1, 3, 2)
+    z := z right
+    self assert: z focus equals: 3
+    z := z remove
+    self assert: z asList equals: #(1, 2)
+
+  // === Collection protocol ===
+  testSize =>
+    self assert: (ListZipper on: #(1, 2, 3)) size equals: 3
+    self assert: (ListZipper on: #(1)) size equals: 1
+
+  testIsEmptyIsAlwaysFalse =>
+    self deny: (ListZipper on: #(1)) isEmpty
+    self deny: ((ListZipper on: #(1, 2)) remove) isEmpty
+
+  testDoIteratesInSequenceOrderNotFromFocus =>
+    z := (ListZipper on: #(1, 2, 3)) right right
+    self assert: z focus equals: 3
+    seen := z inject: #() into: [:acc :x | acc addFirst: x]
+    self assert: seen reversed equals: #(1, 2, 3)
+
+  testAsList =>
+    self assert: (ListZipper on: #(1, 2, 3)) asList equals: #(1, 2, 3)
+    self assert: ((ListZipper on: #(1, 2, 3)) right) asList equals: #(1, 2, 3)
+    self assert: (ListZipper on: #(1)) asList equals: #(1)
+
+  testPrintString =>
+    self assert: (ListZipper on: #(1)) printString equals: "ListZipper(1)"
+    self assert: (ListZipper on: #(1, 2, 3)) printString equals: "ListZipper(3)"
+    self assert: ((ListZipper on: #(1, 2)) insertAfter: 9) printString equals: "ListZipper(3)"
+
+  // === Inherited Collection protocol ===
+  testInheritedIncludes =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: (z includes: 2)
+    self deny: (z includes: 9)
+
+  testInheritedCollect =>
+    z := ListZipper on: #(1, 2, 3)
+    doubled := z collect: [:x | x * 2]
+    self assert: doubled class equals: ListZipper
+    self assert: doubled asList equals: #(2, 4, 6)
+
+  testInheritedSelect =>
+    z := ListZipper on: #(1, 2, 3, 4)
+    big := z select: [:x | x > 2]
+    self assert: big class equals: ListZipper
+    self assert: big asList equals: #(3, 4)
+
+  testInheritedDetect =>
+    z := ListZipper on: #(1, 2, 3)
+    self assert: (z detect: [:x | x > 1]) equals: 2
+    self assert: (z detect: [:x | x > 9] ifNone: [0]) equals: 0
+
+  testInheritedSum => self assert: (ListZipper on: #(1, 2, 3)) sum equals: 6

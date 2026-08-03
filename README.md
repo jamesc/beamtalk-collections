@@ -18,9 +18,10 @@ discovery). It dogfoods the package system introduced by ADR 0070 (namespaces) a
 
 `collections@Deque` (a banker's deque) landed in
 [BT-3011](https://linear.app/beamtalk/issue/BT-3011), `collections@PriorityQueue` (a pairing heap) in
-[BT-3013](https://linear.app/beamtalk/issue/BT-3013), and `collections@SortedMap` / `collections@SortedSet`
-(weight-balanced trees) in [BT-3012](https://linear.app/beamtalk/issue/BT-3012). Nothing has been published to
-the registry yet, so depend on this repo as a git dependency for now (see
+[BT-3013](https://linear.app/beamtalk/issue/BT-3013), `collections@SortedMap` / `collections@SortedSet`
+(weight-balanced trees) in [BT-3012](https://linear.app/beamtalk/issue/BT-3012), and `collections@ListZipper`
+(Huet's zipper over a sequence) in [BT-3015](https://linear.app/beamtalk/issue/BT-3015). Nothing has been
+published to the registry yet, so depend on this repo as a git dependency for now (see
 [Adding this as a dependency](#adding-this-as-a-dependency)).
 
 | Structure | Status |
@@ -29,7 +30,8 @@ the registry yet, so depend on this repo as a git dependency for now (see
 | [`PriorityQueue`](#priorityqueue) | Shipped |
 | [`SortedMap`](#sortedmap) | Shipped |
 | [`SortedSet`](#sortedset) | Shipped |
-| `Zipper`, `CatenableList`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
+| [`ListZipper`](#listzipper) | Shipped |
+| `TreeZipper`, `CatenableList`, … | Planned — see [BT-2697](https://linear.app/beamtalk/issue/BT-2697) |
 
 ## Usage
 
@@ -280,6 +282,40 @@ s union: (collections@SortedSet withAll: #(2))
 | Set algebra | `union:`, `intersection:`, `difference:` |
 | Conversions | `asSet`, `asList`, `asSortedSet` |
 | Equality | `equals:` — see [Equality](#equality). Not `=:=` |
+
+## ListZipper
+
+[Huet's zipper](https://www.st.cs.uni-saarland.de/edu/seminare/2005/advanced-fp/docs/huet-zipper.pdf):
+a cursor into an immutable sequence that makes navigating to a neighbouring element and editing at the
+focus O(1), by carrying the elements to the left (reversed) and right of the focus alongside it instead
+of an index into the original sequence.
+
+```beamtalk
+z := collections@ListZipper on: #(1, 2, 3)
+z focus                     // => 1
+z right focus               // => 2
+(z right insertAfter: 9) asList   // => #(1, 2, 9, 3)
+z remove asList              // => #(2, 3)
+```
+
+| Group | Messages |
+|---|---|
+| Construction | `on:`, `withAll:` |
+| Navigation | `focus`, `left`, `right`, `atStart`, `atEnd` |
+| Editing | `replace:`, `insertBefore:`, `insertAfter:`, `remove` |
+| Collection protocol | `size`, `isEmpty`, `do:`, `asList`, `collect:`, `select:`, `reject:` |
+
+A `ListZipper` always has a focus — there is no empty zipper. `on:` raises if the collection it is built
+from is empty, and `remove` raises if the focus is the only element left, since either result would have
+no focus to stand on. `left` and `right` move the cursor one step and raise when it would move off
+either end of the sequence — the same failure `Array at:` reports for an out-of-bounds index.
+
+`left`/`right`/`replace:`/`insertBefore:`/`insertAfter:`/`remove` are all O(1): the reversed left list
+makes stepping the cursor a pop from one side and a push onto the other, never a walk to the far end.
+Only `on:`, `asList`, and `do:` are O(n) — reconstituting or walking the whole sequence.
+
+`isEmpty` always answers `false` — a zipper without a focus cannot exist — and `do:` walks the sequence
+in order from the start, not outward from the cursor.
 
 ## Ordering and comparator identity
 
