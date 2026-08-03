@@ -230,6 +230,19 @@ TestCase subclass: ListZipperTest
     self assert: big class equals: ListZipper
     self assert: big asList equals: #(3, 4)
 
+  // select:/reject: rebuild via `species withAll:`, which is `on:` here — and
+  // `on:` raises on an empty result. Without an override, that raise would
+  // name `on:` instead of the call the caller actually made.
+  testSelectMatchingNothingRaisesNamingSelect =>
+    z := ListZipper on: #(1, 2, 3)
+    caught := [z select: [:x | x > 100]] on: Exception do: [:e | e]
+    self assert: (caught message includesSubstring: "select:")
+
+  testRejectMatchingEverythingRaisesNamingReject =>
+    z := ListZipper on: #(1, 2, 3)
+    caught := [z reject: [:x | x > 0]] on: Exception do: [:e | e]
+    self assert: (caught message includesSubstring: "reject:")
+
   testInheritedDetect =>
     z := ListZipper on: #(1, 2, 3)
     self assert: (z detect: [:x | x > 1]) equals: 2

@@ -34,6 +34,11 @@
 /// element, both raise for the complementary reason: the result would have no
 /// focus, and a zipper cannot exist without one.
 ///
+/// `select:` and `reject:` can hit that same no-focus case from an angle the
+/// other operations don't: filtering down to zero matches or zero survivors.
+/// Each raises for the same reason `on:` does, but names itself rather than
+/// `on:` — see their comments.
+///
 /// ## Examples
 ///
 /// ```beamtalk
@@ -282,6 +287,48 @@ typed Collection(E) subclass: ListZipper(E)
     self.left reversed do: block
     block value: self.focus
     self.right do: block
+
+  /// Select the elements satisfying `block`, focused on the first match. O(n).
+  ///
+  /// Overridden because the inherited version rebuilds via `species withAll:`,
+  /// which is `on:` here — and `on:` raises when its result would be empty,
+  /// naming `on:` rather than the call the caller actually made. This override
+  /// catches that case itself so the raised message names `select:` instead.
+  /// `reject:` gets its own override below rather than inheriting this one
+  /// through `Collection>>reject:`'s delegation — that would still raise, but
+  /// naming `select:`, one call-site removed from what the caller wrote.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2, 3, 4)) select: [:x | x > 2]) asList   // => #(3, 4)
+  /// ```
+  select: block :: Block(E, Boolean) -> ListZipper(E) =>
+    matches := self asList select: block
+    matches isEmpty
+      ifTrue: [
+        self error: "ListZipper>>select: — no element satisfied the block; a zipper always has a focus, so the result can't be empty"
+      ]
+    ListZipper on: matches
+
+  /// Reject the elements satisfying `block`, focused on the first survivor.
+  /// O(n).
+  ///
+  /// Overridden for the same reason as `select:` — see there. Not left to
+  /// inherit `select:`'s override through `Collection>>reject:`'s delegation:
+  /// that would still raise, but naming `select:`, which is one call-site
+  /// removed from what the caller actually wrote.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2, 3, 4)) reject: [:x | x > 2]) asList   // => #(1, 2)
+  /// ```
+  reject: block :: Block(E, Boolean) -> ListZipper(E) =>
+    survivors := self asList reject: block
+    survivors isEmpty
+      ifTrue: [
+        self error: "ListZipper>>reject: — every element satisfied the block; a zipper always has a focus, so the result can't be empty"
+      ]
+    ListZipper on: survivors
 
   /// Reconstitute the whole sequence in order, cursor position discarded.
   /// O(n).
