@@ -1,0 +1,350 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ListZipper — Huet's zipper: a cursor with O(1) local navigation and edits
+/// into an immutable sequence.
+///
+/// A zipper is a cursor into a persistent structure that carries "the path
+/// back to the root" alongside the focused element, so moving the cursor and
+/// editing at it are cheap without ever mutating anything. `ListZipper` is
+/// the list-shaped instance of that construction: three fields — a
+/// **reversed** left list, the focused element, and the right list. Reversing
+/// the left side is what makes `left`/`right` O(1): both are a pop from one
+/// list and a push onto the other, never a walk to the far end.
+///
+/// A `ListZipper` always has a focus — there is no empty zipper. Build one
+/// from any non-empty collection with `on:`.
+///
+/// Use this for cursor-in-a-sequence problems: a text buffer's insertion
+/// point, undo/redo over a linear history, playlist navigation — anywhere you
+/// want to walk back and forth over a sequence and edit near where you are
+/// standing, keeping every version you pass through.
+///
+/// `new` is inherited from `Value` and cannot be sealed off here — do not
+/// call it directly. It answers a zipper with a `nil` focus and no elements,
+/// which satisfies none of this class's invariants; `on:` is the only
+/// supported constructor.
+///
+/// ## Errors
+///
+/// `left` at the start and `right` at the end raise — moving the cursor off
+/// either end of the sequence is the same failure `Array at:` reports for an
+/// out-of-bounds index; the sequence itself is not empty, so this is not the
+/// empty-collection case. `on:` an empty collection, and `remove` on the only
+/// element, both raise for the complementary reason: the result would have no
+/// focus, and a zipper cannot exist without one.
+///
+/// `select:` and `reject:` can hit that same no-focus case from an angle the
+/// other operations don't: filtering down to zero matches or zero survivors.
+/// Each raises for the same reason `on:` does, but names itself rather than
+/// `on:` — see their comments.
+///
+/// ## Examples
+///
+/// ```beamtalk
+/// z := ListZipper on: #(1, 2, 3)
+/// z focus                                 // => 1
+/// z atStart                               // => true
+/// z right focus                           // => 2
+/// (z right right) atEnd                   // => true
+/// (z replace: 9) asList                   // => #(9, 2, 3)
+/// (z insertAfter: 9) asList               // => #(1, 9, 2, 3)
+/// z remove asList                         // => #(2, 3)
+/// z asList                                // => #(1, 2, 3)
+/// ```
+typed Collection(E) subclass: ListZipper(E)
+  /// Elements to the left of the focus, closest neighbour first — the
+  /// reverse of their order in the sequence.
+  field: left :: List(E) = #()
+  /// The element the cursor is standing on.
+  field: focus :: E | Nil = nil
+  /// Elements to the right of the focus, closest neighbour first — their
+  /// order in the sequence.
+  field: right :: List(E) = #()
+  /// Element count, tracked so `size` stays O(1) rather than walking both
+  /// lists.
+  field: count :: Integer = 0
+
+  // === Construction ===
+
+  /// Create a zipper focused on the first element of `aCollection`. O(n).
+  ///
+  /// Raises when `aCollection` is empty: a zipper always has a focus, so
+  /// there is no empty zipper to answer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) focus   // => 1
+  /// (ListZipper on: #(1, 2, 3)) atStart // => true
+  /// ```
+  class on: aCollection :: Collection(E) -> ListZipper(E) =>
+    elements := aCollection asList
+    elements isEmpty
+      ifTrue: [
+        self error: "ListZipper class>>on: — collection is empty; a zipper always has a focus"
+      ]
+    ListZipper
+      new: #{
+        #left => #(),
+        #focus => elements first,
+        #right => elements rest,
+        #count => elements size
+      }
+
+  /// Alias for `on:`, in the vocabulary `Collection>>collect:`/`select:`/
+  /// `reject:` expect from `species` (ADR 0037) — without it, those inherited
+  /// methods would raise `does_not_understand: #withAll:` when rebuilding a
+  /// `ListZipper`. Raises the same way `on:` does when `list` is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper withAll: #(1, 2, 3)) focus                       // => 1
+  /// ((ListZipper on: #(1, 2, 3)) collect: [:x | x * 10]) asList  // => #(10, 20, 30)
+  /// ```
+  class withAll: list :: List(E) -> ListZipper(E) => ListZipper on: list
+
+  // === Navigation ===
+
+  /// The element the cursor is standing on. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) focus   // => 1
+  /// ```
+  focus -> E => self.focus
+
+  /// Test whether the cursor is on the first element. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2)) atStart          // => true
+  /// (ListZipper on: #(1, 2)) right atStart    // => false
+  /// ```
+  atStart -> Boolean => self.left isEmpty
+
+  /// Test whether the cursor is on the last element. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2)) atEnd          // => false
+  /// (ListZipper on: #(1, 2)) right atEnd    // => true
+  /// ```
+  atEnd -> Boolean => self.right isEmpty
+
+  /// Move the cursor one element left. O(1).
+  ///
+  /// Raises when already `atStart` — see the class comment's Errors section.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) right left focus   // => 1
+  /// ```
+  left -> ListZipper(E) =>
+    self.left isEmpty ifTrue: [
+      self error: "ListZipper>>left — already at the start of the sequence"
+    ]
+    ListZipper
+      new: #{
+        #left => self.left rest,
+        #focus => self.left first,
+        #right => self.right addFirst: self.focus,
+        #count => self.count
+      }
+
+  /// Move the cursor one element right. O(1).
+  ///
+  /// Raises when already `atEnd` — see the class comment's Errors section.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) right focus   // => 2
+  /// ```
+  right -> ListZipper(E) =>
+    self.right isEmpty ifTrue: [
+      self error: "ListZipper>>right — already at the end of the sequence"
+    ]
+    ListZipper
+      new: #{
+        #left => self.left addFirst: self.focus,
+        #focus => self.right first,
+        #right => self.right rest,
+        #count => self.count
+      }
+
+  // === Editing ===
+
+  /// Return a new zipper with the focus replaced by `anElement`. O(1). The
+  /// cursor does not move.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2)) replace: 9) asList   // => #(9, 2)
+  /// ```
+  replace: anElement :: E -> ListZipper(E) =>
+    ListZipper
+      new: #{
+        #left => self.left,
+        #focus => anElement,
+        #right => self.right,
+        #count => self.count
+      }
+
+  /// Return a new zipper with `anElement` inserted immediately to the left of
+  /// the focus. O(1). The cursor stays on the same element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2)) insertBefore: 9) asList   // => #(9, 1, 2)
+  /// ((ListZipper on: #(1, 2)) insertBefore: 9) focus    // => 1
+  /// ```
+  insertBefore: anElement :: E -> ListZipper(E) =>
+    ListZipper
+      new: #{
+        #left => self.left addFirst: anElement,
+        #focus => self.focus,
+        #right => self.right,
+        #count => self.count + 1
+      }
+
+  /// Return a new zipper with `anElement` inserted immediately to the right
+  /// of the focus. O(1). The cursor stays on the same element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2)) insertAfter: 9) asList   // => #(1, 9, 2)
+  /// ((ListZipper on: #(1, 2)) insertAfter: 9) focus    // => 1
+  /// ```
+  insertAfter: anElement :: E -> ListZipper(E) =>
+    ListZipper
+      new: #{
+        #left => self.left,
+        #focus => self.focus,
+        #right => self.right addFirst: anElement,
+        #count => self.count + 1
+      }
+
+  /// Return a new zipper with the focus removed.
+  ///
+  /// O(1). The cursor moves to the element on the right, or to the element on
+  /// the left when the focus was the last element. Raises when the focus is
+  /// the only element — the result would have no focus to stand on.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) remove asList          // => #(2, 3)
+  /// (ListZipper on: #(1, 2, 3)) remove focus           // => 2
+  /// ((ListZipper on: #(1, 2, 3)) right remove) asList  // => #(1, 3)
+  /// ```
+  remove -> ListZipper(E) =>
+    self.right isEmpty
+      ifFalse: [
+        ^ListZipper
+          new: #{
+            #left => self.left,
+            #focus => self.right first,
+            #right => self.right rest,
+            #count => self.count - 1
+          }
+      ]
+    self.left isEmpty
+      ifFalse: [
+        ^ListZipper
+          new: #{
+            #left => self.left rest,
+            #focus => self.left first,
+            #right => self.right,
+            #count => self.count - 1
+          }
+      ]
+    self error: "ListZipper>>remove — cannot remove the only element; the result would have no focus"
+
+  // === Collection protocol ===
+
+  /// Number of elements. O(1) — the count is carried in the zipper's state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) size   // => 3
+  /// ```
+  size -> Integer => self.count
+
+  /// A zipper always has a focus, so it is never empty. O(1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1)) isEmpty   // => false
+  /// ```
+  isEmpty -> Boolean => false
+
+  /// Evaluate `block` with each element, in sequence order — from the start
+  /// of the sequence, not from the cursor. O(n).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) asList size   // => 3
+  /// ```
+  do: block :: Block(E, Object) -> Nil =>
+    self.left reversed do: block
+    block value: self.focus
+    self.right do: block
+
+  /// Select the elements satisfying `block`, focused on the first match. O(n).
+  ///
+  /// Overridden because the inherited version rebuilds via `species withAll:`,
+  /// which is `on:` here — and `on:` raises when its result would be empty,
+  /// naming `on:` rather than the call the caller actually made. This override
+  /// catches that case itself so the raised message names `select:` instead.
+  /// `reject:` gets its own override below rather than inheriting this one
+  /// through `Collection>>reject:`'s delegation — that would still raise, but
+  /// naming `select:`, one call-site removed from what the caller wrote.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2, 3, 4)) select: [:x | x > 2]) asList   // => #(3, 4)
+  /// ```
+  select: block :: Block(E, Boolean) -> ListZipper(E) =>
+    matches := self asList select: block
+    matches isEmpty
+      ifTrue: [
+        self error: "ListZipper>>select: — no element satisfied the block; a zipper always has a focus, so the result can't be empty"
+      ]
+    ListZipper on: matches
+
+  /// Reject the elements satisfying `block`, focused on the first survivor.
+  /// O(n).
+  ///
+  /// Overridden for the same reason as `select:` — see there. Not left to
+  /// inherit `select:`'s override through `Collection>>reject:`'s delegation:
+  /// that would still raise, but naming `select:`, which is one call-site
+  /// removed from what the caller actually wrote.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((ListZipper on: #(1, 2, 3, 4)) reject: [:x | x > 2]) asList   // => #(1, 2)
+  /// ```
+  reject: block :: Block(E, Boolean) -> ListZipper(E) =>
+    survivors := self asList reject: block
+    survivors isEmpty
+      ifTrue: [
+        self error: "ListZipper>>reject: — every element satisfied the block; a zipper always has a focus, so the result can't be empty"
+      ]
+    ListZipper on: survivors
+
+  /// Reconstitute the whole sequence in order, cursor position discarded.
+  /// O(n).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) asList         // => #(1, 2, 3)
+  /// ((ListZipper on: #(1, 2, 3)) right) asList // => #(1, 2, 3)
+  /// ```
+  asList -> List(E) =>
+    self.left reversed ++ (#() addFirst: self.focus) ++ self.right
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ListZipper on: #(1, 2, 3)) printString   // => "ListZipper(3)"
+  /// ```
+  printString -> String => "ListZipper(" ++ self.count printString ++ ")"
