@@ -71,9 +71,9 @@ TestCase subclass: SortedMapTest
     self assert: (self sample at: 4 ifAbsent: [#missing]) equals: #missing
     self assert: (SortedMap new at: 1 ifAbsent: [#missing]) equals: #missing
 
-  testAtMissingKeyRaises => self should: [self sample at: 4] raise: #user_error
+  testAtMissingKeyRaises => self should: [self sample at: 4] raise: #key_error
 
-  testAtOnEmptyRaises => self should: [SortedMap new at: 1] raise: #user_error
+  testAtOnEmptyRaises => self should: [SortedMap new at: 1] raise: #key_error
 
   testIncludesKey =>
     self assert: (self sample includesKey: 1) equals: true
@@ -233,13 +233,17 @@ TestCase subclass: SortedMapTest
     self assert: m first equals: "g"
     self assert: m last equals: "g"
 
-  testEmptyMinRaises => self should: [SortedMap new min] raise: #user_error
+  testEmptyMinRaises =>
+    self should: [SortedMap new min] raise: #empty_collection
 
-  testEmptyMaxRaises => self should: [SortedMap new max] raise: #user_error
+  testEmptyMaxRaises =>
+    self should: [SortedMap new max] raise: #empty_collection
 
-  testEmptyFirstRaises => self should: [SortedMap new first] raise: #user_error
+  testEmptyFirstRaises =>
+    self should: [SortedMap new first] raise: #empty_collection
 
-  testEmptyLastRaises => self should: [SortedMap new last] raise: #user_error
+  testEmptyLastRaises =>
+    self should: [SortedMap new last] raise: #empty_collection
 
   // === floor: / ceiling: ===
   testFloorExactHit => self assert: (self sample floor: 3) equals: 3
@@ -249,10 +253,10 @@ TestCase subclass: SortedMapTest
   testFloorAboveMaxIsTheMax => self assert: (self sample floor: 99) equals: 5
 
   testFloorBelowMinRaises =>
-    self should: [self sample floor: 0] raise: #user_error
+    self should: [self sample floor: 0] raise: #not_found
 
   testFloorOnEmptyRaises =>
-    self should: [SortedMap new floor: 1] raise: #user_error
+    self should: [SortedMap new floor: 1] raise: #not_found
 
   testFloorIfAbsent =>
     self assert: (self sample floor: 0 ifAbsent: [#none]) equals: #none
@@ -266,10 +270,10 @@ TestCase subclass: SortedMapTest
   testCeilingBelowMinIsTheMin => self assert: (self sample ceiling: 0) equals: 1
 
   testCeilingAboveMaxRaises =>
-    self should: [self sample ceiling: 99] raise: #user_error
+    self should: [self sample ceiling: 99] raise: #not_found
 
   testCeilingOnEmptyRaises =>
-    self should: [SortedMap new ceiling: 1] raise: #user_error
+    self should: [SortedMap new ceiling: 1] raise: #not_found
 
   testCeilingIfAbsent =>
     self assert: (self sample ceiling: 99 ifAbsent: [#none]) equals: #none

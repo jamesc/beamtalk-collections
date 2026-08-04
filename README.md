@@ -95,11 +95,11 @@ mirroring `List first` / `List rest` — rather than one message answering a pai
 splitting them: the deque is immutable, so there is no atomicity to preserve, and both halves are
 (amortised) O(1).
 
-Accessing or removing from an empty end raises a structured `#beamtalk_error` (a `#user_error`)
-rather than answering `nil` — that matches `Dictionary at:` and `Queue peek`, and empty-end access is
-caller misuse rather than an environmental failure (so it is an exception, not a `Result`, per ADR
-0060). Each raising accessor is paired with a non-raising `…IfEmpty:` variant that evaluates the block
-and answers its value instead, in the style of `Dictionary at:ifAbsent:` and
+Accessing or removing from an empty end raises a structured `#beamtalk_error` of kind
+`#empty_collection` rather than answering `nil` — that matches `Dictionary at:` and `Queue peek`, and
+empty-end access is caller misuse rather than an environmental failure (so it is an exception, not a
+`Result`, per ADR 0060). Each raising accessor is paired with a non-raising `…IfEmpty:` variant that
+evaluates the block and answers its value instead, in the style of `Dictionary at:ifAbsent:` and
 `Collection detect:ifNone:`.
 
 `Deque` is a `Collection` subclass, so the whole inherited `Collection` protocol works too:
@@ -118,7 +118,7 @@ d removeFirst asList              // => #(2, 3, 4)
 d last                            // => 4
 d removeLast asList               // => #(1, 2, 3)
 
-collections@Deque new first       // raises #beamtalk_error
+collections@Deque new first       // raises #beamtalk_error (#empty_collection)
 collections@Deque new firstIfEmpty: [0]             // => 0
 collections@Deque new removeFirstIfEmpty: [#empty]  // => #empty
 
@@ -199,8 +199,9 @@ It is preserved anyway: you explicitly chose that ordering, and silently reverti
 worse failure mode than a comparator that raises. Mapping to a type your comparator cannot handle is
 caller error — go through `asSortedList` or `asList` first if you want out of the ordering.
 
-**Empty queues.** `peek` and `removeMin` raise on an empty queue; `peekIfEmpty:` and `removeMinIfEmpty:`
-take a block and return its value instead. These raise rather than answering a `Result` on purpose:
+**Empty queues.** `peek` and `removeMin` raise `#empty_collection` on an empty queue; `peekIfEmpty:` and
+`removeMinIfEmpty:` take a block and return its value instead. These raise rather than answering a
+`Result` on purpose:
 per [ADR 0060](https://github.com/jamesc/beamtalk/blob/main/docs/ADR/0060-result-type-hybrid-error-handling.md),
 `Result` is for environmental failures (I/O, parsing, network) while exceptions signal caller misuse, and
 asking an empty heap for its minimum is caller misuse.
@@ -305,10 +306,11 @@ z remove asList              // => #(2, 3)
 | Editing | `replace:`, `insertBefore:`, `insertAfter:`, `remove` |
 | Collection protocol | `size`, `isEmpty`, `do:`, `asList`, `collect:`, `select:`, `reject:` |
 
-A `ListZipper` always has a focus — there is no empty zipper. `on:` raises if the collection it is built
-from is empty, and `remove` raises if the focus is the only element left, since either result would have
-no focus to stand on. `left` and `right` move the cursor one step and raise when it would move off
-either end of the sequence — the same failure `Array at:` reports for an out-of-bounds index.
+A `ListZipper` always has a focus — there is no empty zipper. `on:` raises `#empty_collection` if the
+collection it is built from is empty, and `remove` raises `#empty_collection` if the focus is the only
+element left, since either result would have no focus to stand on. `left` and `right` move the cursor
+one step and raise `#index_out_of_bounds` when it would move off either end of the sequence — the same
+kind `Array at:` reports for an out-of-bounds index.
 
 `left`/`right`/`replace:`/`insertBefore:`/`insertAfter:`/`remove` are all O(1): the reversed left list
 makes stepping the cursor a pop from one side and a push onto the other, never a walk to the far end.
@@ -348,8 +350,11 @@ block maps `E -> R`: the caller chose that ordering, and failing loudly on an in
 quietly reverting to natural order.
 
 Range scans are inclusive of both bounds, and neither bound has to be present in the collection.
-`min`, `max`, `first`, `last` and the `ifAbsent:`-less `at:`, `floor:` and `ceiling:` raise a
-structured error rather than answering `nil` when there is no such element.
+`min`, `max`, `first` and `last` raise `#empty_collection` rather than answering `nil` on an empty
+structure. The `ifAbsent:`-less `floor:` and `ceiling:` raise `#not_found` when no key/element
+satisfies the ordering constraint — the same kind `Collection>>detect:` raises on a predicate
+search with no match. `SortedMap`'s `ifAbsent:`-less `at:` raises `#key_error` on a missing key,
+matching core `Dictionary>>at:`.
 
 The balanced tree behind both classes (`SortedTreeNode`) is an implementation detail of this package,
 not public API.

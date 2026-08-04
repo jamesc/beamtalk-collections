@@ -21,7 +21,8 @@ TestCase subclass: ListZipperTest
     self assert: z atEnd
     self assert: z size equals: 1
 
-  testOnEmptyRaises => self should: [ListZipper on: #()] raise: #user_error
+  testOnEmptyRaises =>
+    self should: [ListZipper on: #()] raise: #empty_collection
 
   testWithAllIsAliasForOn =>
     z := ListZipper withAll: #(1, 2, 3)
@@ -29,7 +30,7 @@ TestCase subclass: ListZipperTest
     self assert: z asList equals: #(1, 2, 3)
 
   testWithAllEmptyRaises =>
-    self should: [ListZipper withAll: #()] raise: #user_error
+    self should: [ListZipper withAll: #()] raise: #empty_collection
 
   // === Navigation ===
   testAtStartAndAtEnd =>
@@ -65,18 +66,18 @@ TestCase subclass: ListZipperTest
     self assert: z atStart
 
   testLeftAtStartRaises =>
-    self should: [(ListZipper on: #(1, 2, 3)) left] raise: #user_error
+    self should: [(ListZipper on: #(1, 2, 3)) left] raise: #index_out_of_bounds
 
   testRightAtEndRaises =>
     self should: [
       ((ListZipper on: #(1, 2, 3)) right right) right
-    ] raise: #user_error
+    ] raise: #index_out_of_bounds
 
   testLeftAtStartRaisesOnSingleElement =>
-    self should: [(ListZipper on: #(1)) left] raise: #user_error
+    self should: [(ListZipper on: #(1)) left] raise: #index_out_of_bounds
 
   testRightAtEndRaisesOnSingleElement =>
-    self should: [(ListZipper on: #(1)) right] raise: #user_error
+    self should: [(ListZipper on: #(1)) right] raise: #index_out_of_bounds
 
   // === Editing: replace: ===
   testReplace =>
@@ -152,13 +153,13 @@ TestCase subclass: ListZipperTest
     self assert: z atEnd
 
   testRemoveOnlyElementRaises =>
-    self should: [(ListZipper on: #(1)) remove] raise: #user_error
+    self should: [(ListZipper on: #(1)) remove] raise: #empty_collection
 
   testRemoveDownToOne =>
     z := (ListZipper on: #(1, 2)) remove
     self assert: z size equals: 1
     self assert: z focus equals: 2
-    self should: [z remove] raise: #user_error
+    self should: [z remove] raise: #empty_collection
 
   testRemoveDoesNotMutateReceiver =>
     z := ListZipper on: #(1, 2, 3)

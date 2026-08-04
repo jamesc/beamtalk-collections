@@ -197,14 +197,23 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Lookup ===
 
-  /// Value stored under `key`. Raises an error when the key is absent.
+  /// Value stored under `key`. Raises `#key_error` when the key is absent —
+  /// matching core `Dictionary>>at:` on a missing key.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap new at: 1 put: "a") at: 1   // => "a"
   /// ```
   at: key :: K -> V =>
-    self at: key ifAbsent: [self error: "SortedMap: key not found"]
+    self
+      at: key
+      ifAbsent: [
+        Exception
+          signalKind: #key_error
+          class: #SortedMap
+          selector: #at:
+          hint: "key not found"
+      ]
 
   /// Value stored under `key`, or the result of `absentBlock` when absent.
   ///
@@ -353,7 +362,7 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Ends ===
 
-  /// Smallest key. Raises an error when the map is empty.
+  /// Smallest key. Raises `#empty_collection` when the map is empty.
   ///
   /// `min` and `max` answer *keys*, because keys are the ordered dimension
   /// of a map; `first` and `last` answer the values sitting at those keys.
@@ -363,37 +372,51 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) min   // => 1
   /// ```
   min -> K =>
-    self isEmpty ifTrue: [self error: "SortedMap min: map is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #min
+    ]
     self tree minNode key
 
-  /// Largest key. Raises an error when the map is empty.
+  /// Largest key. Raises `#empty_collection` when the map is empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) max   // => 2
   /// ```
   max -> K =>
-    self isEmpty ifTrue: [self error: "SortedMap max: map is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #max
+    ]
     self tree maxNode key
 
-  /// Value stored under the smallest key. Raises an error when empty.
+  /// Value stored under the smallest key. Raises `#empty_collection` when
+  /// empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) first   // => "a"
   /// ```
   first -> V =>
-    self isEmpty ifTrue: [self error: "SortedMap first: map is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #first
+    ]
     self tree minNode val
 
-  /// Value stored under the largest key. Raises an error when empty.
+  /// Value stored under the largest key. Raises `#empty_collection` when
+  /// empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) last   // => "b"
   /// ```
   last -> V =>
-    self isEmpty ifTrue: [self error: "SortedMap last: map is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #last
+    ]
     self tree maxNode val
 
   /// Smallest key, or `emptyBlock`'s value when the map is empty.
@@ -444,8 +467,9 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Nearest neighbours ===
 
-  /// Greatest key that sorts at or before `key`. Raises an error when every
-  /// key sorts after it.
+  /// Greatest key that sorts at or before `key`. Raises `#not_found` when
+  /// every key sorts after it — the same kind `Collection>>detect:` raises
+  /// on a predicate search with no match.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -453,9 +477,15 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) floor: 5   // => 5
   /// ```
   floor: key :: K -> K =>
-    self floor: key ifAbsent: [
-      self error: "SortedMap floor: no key sorts at or before the given key"
-    ]
+    self
+      floor: key
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedMap
+          selector: #floor:
+          hint: "no key sorts at or before the given key"
+      ]
 
   /// Greatest key that sorts at or before `key`, or the result of
   /// `absentBlock` when every key sorts after it.
@@ -471,8 +501,8 @@ typed Collection(V) subclass: SortedMap(K, V)
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
-  /// Least key that sorts at or after `key`. Raises an error when every key
-  /// sorts before it.
+  /// Least key that sorts at or after `key`. Raises `#not_found` when every
+  /// key sorts before it.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -480,9 +510,15 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) ceiling: 1   // => 1
   /// ```
   ceiling: key :: K -> K =>
-    self ceiling: key ifAbsent: [
-      self error: "SortedMap ceiling: no key sorts at or after the given key"
-    ]
+    self
+      ceiling: key
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedMap
+          selector: #ceiling:
+          hint: "no key sorts at or after the given key"
+      ]
 
   /// Least key that sorts at or after `key`, or the result of `absentBlock`
   /// when every key sorts before it.

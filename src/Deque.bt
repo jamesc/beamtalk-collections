@@ -107,7 +107,7 @@ typed Collection(E) subclass: Deque(E)
   ///
   /// Amortised O(1). Pair it with `first` when you need the removed element
   /// too — the same element-plus-remainder split as `List first` / `List rest`.
-  /// Raises a `#beamtalk_error` when the Deque is empty; use
+  /// Raises `#empty_collection` when the Deque is empty; use
   /// `removeFirstIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
@@ -117,7 +117,10 @@ typed Collection(E) subclass: Deque(E)
   /// d removeFirst asList   // => #(2, 3)
   /// ```
   removeFirst -> Deque(E) =>
-    self isEmpty ifTrue: [self error: "Deque removeFirst: deque is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #removeFirst
+    ]
     self droppedFront
 
   /// Remove the front element, answering just the remaining Deque, or evaluate
@@ -138,7 +141,7 @@ typed Collection(E) subclass: Deque(E)
   /// Remove the back element, answering just the remaining Deque.
   ///
   /// Amortised O(1). Pair it with `last` when you need the removed element
-  /// too. Raises a `#beamtalk_error` when the Deque is empty; use
+  /// too. Raises `#empty_collection` when the Deque is empty; use
   /// `removeLastIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
@@ -148,7 +151,10 @@ typed Collection(E) subclass: Deque(E)
   /// d removeLast asList    // => #(1, 2)
   /// ```
   removeLast -> Deque(E) =>
-    self isEmpty ifTrue: [self error: "Deque removeLast: deque is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #removeLast
+    ]
     self droppedRear
 
   /// Remove the back element, answering just the remaining Deque, or evaluate
@@ -167,7 +173,7 @@ typed Collection(E) subclass: Deque(E)
 
   /// Return the front element without removing it.
   ///
-  /// O(1). Raises a `#beamtalk_error` when the Deque is empty; use
+  /// O(1). Raises `#empty_collection` when the Deque is empty; use
   /// `firstIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
@@ -175,7 +181,10 @@ typed Collection(E) subclass: Deque(E)
   /// (Deque withAll: #(1, 2, 3)) first   // => 1
   /// ```
   first -> E =>
-    self isEmpty ifTrue: [self error: "Deque first: deque is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #first
+    ]
     self peekFront
 
   /// Return the front element without removing it, or evaluate `emptyBlock`
@@ -194,7 +203,7 @@ typed Collection(E) subclass: Deque(E)
 
   /// Return the back element without removing it.
   ///
-  /// O(1). Raises a `#beamtalk_error` when the Deque is empty; use
+  /// O(1). Raises `#empty_collection` when the Deque is empty; use
   /// `lastIfEmpty:` for a non-raising variant.
   ///
   /// ## Examples
@@ -202,7 +211,10 @@ typed Collection(E) subclass: Deque(E)
   /// (Deque withAll: #(1, 2, 3)) last   // => 3
   /// ```
   last -> E =>
-    self isEmpty ifTrue: [self error: "Deque last: deque is empty"]
+    @expect type
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #last
+    ]
     self peekRear
 
   /// Return the back element without removing it, or evaluate `emptyBlock`

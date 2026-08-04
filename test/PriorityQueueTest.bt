@@ -199,16 +199,16 @@ TestCase subclass: PriorityQueueTest
 
   // === Empty-queue behaviour ===
   testPeekOnEmptyRaises =>
-    self should: [PriorityQueue new peek] raise: #user_error
+    self should: [PriorityQueue new peek] raise: #empty_collection
 
   testRemoveMinOnEmptyRaises =>
-    self should: [PriorityQueue new removeMin] raise: #user_error
+    self should: [PriorityQueue new removeMin] raise: #empty_collection
 
   testDrainedQueueRaisesAgain =>
     drained := (PriorityQueue withAll: #(1)) removeMin
     self assert: drained isEmpty equals: true
-    self should: [drained peek] raise: #user_error
-    self should: [drained removeMin] raise: #user_error
+    self should: [drained peek] raise: #empty_collection
+    self should: [drained removeMin] raise: #empty_collection
 
   testPeekIfEmptyOnEmptyDoesNotRaise =>
     self assert: (PriorityQueue new peekIfEmpty: [0]) equals: 0
