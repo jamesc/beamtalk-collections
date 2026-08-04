@@ -233,13 +233,17 @@ TestCase subclass: SortedMapTest
     self assert: m first equals: "g"
     self assert: m last equals: "g"
 
-  testEmptyMinRaises => self should: [SortedMap new min] raise: #user_error
+  testEmptyMinRaises =>
+    self should: [SortedMap new min] raise: #empty_collection
 
-  testEmptyMaxRaises => self should: [SortedMap new max] raise: #user_error
+  testEmptyMaxRaises =>
+    self should: [SortedMap new max] raise: #empty_collection
 
-  testEmptyFirstRaises => self should: [SortedMap new first] raise: #user_error
+  testEmptyFirstRaises =>
+    self should: [SortedMap new first] raise: #empty_collection
 
-  testEmptyLastRaises => self should: [SortedMap new last] raise: #user_error
+  testEmptyLastRaises =>
+    self should: [SortedMap new last] raise: #empty_collection
 
   // === floor: / ceiling: ===
   testFloorExactHit => self assert: (self sample floor: 3) equals: 3

@@ -69,10 +69,10 @@
 ///
 /// ## Errors
 ///
-/// `peek` and `removeMin` raise on an empty queue: asking an empty heap for
-/// its minimum is caller misuse, not an expected environmental failure, so it
-/// is an exception rather than a `Result` (ADR 0060). `peekIfEmpty:` and
-/// `removeMinIfEmpty:` are the non-raising paths.
+/// `peek` and `removeMin` raise `#empty_collection` on an empty queue: asking
+/// an empty heap for its minimum is caller misuse, not an expected
+/// environmental failure, so it is an exception rather than a `Result` (ADR
+/// 0060). `peekIfEmpty:` and `removeMinIfEmpty:` are the non-raising paths.
 ///
 /// ## Examples
 ///
@@ -273,8 +273,9 @@ typed Collection(E) subclass: PriorityQueue(E)
 
   /// Return the minimum element without removing it. O(1).
   ///
-  /// "Minimum" means whichever element the comparator ranks first. Raises an
-  /// error on an empty queue — use `peekIfEmpty:` for the non-raising path.
+  /// "Minimum" means whichever element the comparator ranks first. Raises
+  /// `#empty_collection` on an empty queue — use `peekIfEmpty:` for the
+  /// non-raising path.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -282,7 +283,9 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// ```
   peek -> E =>
     self.root isNil
-      ifTrue: [self error: "PriorityQueue>>peek on an empty queue"]
+      ifTrue: [
+        (Erlang beamtalk_collection) raiseEmpty: #PriorityQueue selector: #peek
+      ]
       ifFalse: [
         {element, _children} := self.root
         element
@@ -307,8 +310,8 @@ typed Collection(E) subclass: PriorityQueue(E)
   ///
   /// O(log n) amortised. This answers *only* the remaining queue — pair it
   /// with `peek` when you also want the element that left, exactly as you
-  /// would pair `List first` with `List rest`. Raises an error on an empty
-  /// queue; use `removeMinIfEmpty:` for the non-raising path.
+  /// would pair `List first` with `List rest`. Raises `#empty_collection` on
+  /// an empty queue; use `removeMinIfEmpty:` for the non-raising path.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -320,7 +323,7 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// ```
   removeMin -> PriorityQueue(E) =>
     self.root isNil ifTrue: [
-      self error: "PriorityQueue>>removeMin on an empty queue"
+      (Erlang beamtalk_collection) raiseEmpty: #PriorityQueue selector: #removeMin
     ] ifFalse: [self popRoot]
 
   /// Remove the minimum, or answer the value of `emptyBlock` if empty.

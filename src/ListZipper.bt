@@ -27,17 +27,18 @@
 ///
 /// ## Errors
 ///
-/// `left` at the start and `right` at the end raise — moving the cursor off
-/// either end of the sequence is the same failure `Array at:` reports for an
-/// out-of-bounds index; the sequence itself is not empty, so this is not the
-/// empty-collection case. `on:` an empty collection, and `remove` on the only
-/// element, both raise for the complementary reason: the result would have no
+/// `left` at the start and `right` at the end raise `#index_out_of_bounds` —
+/// moving the cursor off either end of the sequence is the same failure
+/// `Array at:` reports for an out-of-bounds index; the sequence itself is not
+/// empty, so this is not the empty-collection case. `on:` an empty
+/// collection, and `remove` on the only element, both raise
+/// `#empty_collection` for the complementary reason: the result would have no
 /// focus, and a zipper cannot exist without one.
 ///
 /// `select:` and `reject:` can hit that same no-focus case from an angle the
 /// other operations don't: filtering down to zero matches or zero survivors.
-/// Each raises for the same reason `on:` does, but names itself rather than
-/// `on:` — see their comments.
+/// Each raises `#empty_collection` for the same reason `on:` does, but names
+/// itself rather than `on:` — see their comments.
 ///
 /// ## Examples
 ///
@@ -69,8 +70,8 @@ typed Collection(E) subclass: ListZipper(E)
 
   /// Create a zipper focused on the first element of `aCollection`. O(n).
   ///
-  /// Raises when `aCollection` is empty: a zipper always has a focus, so
-  /// there is no empty zipper to answer.
+  /// Raises `#empty_collection` when `aCollection` is empty: a zipper always
+  /// has a focus, so there is no empty zipper to answer.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -79,10 +80,9 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   class on: aCollection :: Collection(E) -> ListZipper(E) =>
     elements := aCollection asList
-    elements isEmpty
-      ifTrue: [
-        self error: "ListZipper class>>on: — collection is empty; a zipper always has a focus"
-      ]
+    elements isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #on:
+    ]
     ListZipper
       new: #{
         #left => #(),
@@ -133,16 +133,22 @@ typed Collection(E) subclass: ListZipper(E)
 
   /// Move the cursor one element left. O(1).
   ///
-  /// Raises when already `atStart` — see the class comment's Errors section.
+  /// Raises `#index_out_of_bounds` when already `atStart` — see the class
+  /// comment's Errors section.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (ListZipper on: #(1, 2, 3)) right left focus   // => 1
   /// ```
   left -> ListZipper(E) =>
-    self.left isEmpty ifTrue: [
-      self error: "ListZipper>>left — already at the start of the sequence"
-    ]
+    self.left isEmpty
+      ifTrue: [
+        Exception
+          signalKind: #index_out_of_bounds
+          class: #ListZipper
+          selector: #left
+          hint: "already at the start of the sequence"
+      ]
     ListZipper
       new: #{
         #left => self.left rest,
@@ -153,16 +159,22 @@ typed Collection(E) subclass: ListZipper(E)
 
   /// Move the cursor one element right. O(1).
   ///
-  /// Raises when already `atEnd` — see the class comment's Errors section.
+  /// Raises `#index_out_of_bounds` when already `atEnd` — see the class
+  /// comment's Errors section.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (ListZipper on: #(1, 2, 3)) right focus   // => 2
   /// ```
   right -> ListZipper(E) =>
-    self.right isEmpty ifTrue: [
-      self error: "ListZipper>>right — already at the end of the sequence"
-    ]
+    self.right isEmpty
+      ifTrue: [
+        Exception
+          signalKind: #index_out_of_bounds
+          class: #ListZipper
+          selector: #right
+          hint: "already at the end of the sequence"
+      ]
     ListZipper
       new: #{
         #left => self.left addFirst: self.focus,
@@ -226,8 +238,9 @@ typed Collection(E) subclass: ListZipper(E)
   /// Return a new zipper with the focus removed.
   ///
   /// O(1). The cursor moves to the element on the right, or to the element on
-  /// the left when the focus was the last element. Raises when the focus is
-  /// the only element — the result would have no focus to stand on.
+  /// the left when the focus was the last element. Raises
+  /// `#empty_collection` when the focus is the only element — the result
+  /// would have no focus to stand on.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -256,7 +269,7 @@ typed Collection(E) subclass: ListZipper(E)
             #count => self.count - 1
           }
       ]
-    self error: "ListZipper>>remove — cannot remove the only element; the result would have no focus"
+    (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #remove
 
   // === Collection protocol ===
 
@@ -304,10 +317,9 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   select: block :: Block(E, Boolean) -> ListZipper(E) =>
     matches := self asList select: block
-    matches isEmpty
-      ifTrue: [
-        self error: "ListZipper>>select: — no element satisfied the block; a zipper always has a focus, so the result can't be empty"
-      ]
+    matches isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #select:
+    ]
     ListZipper on: matches
 
   /// Reject the elements satisfying `block`, focused on the first survivor.
@@ -324,10 +336,9 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   reject: block :: Block(E, Boolean) -> ListZipper(E) =>
     survivors := self asList reject: block
-    survivors isEmpty
-      ifTrue: [
-        self error: "ListZipper>>reject: — every element satisfied the block; a zipper always has a focus, so the result can't be empty"
-      ]
+    survivors isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #reject:
+    ]
     ListZipper on: survivors
 
   /// Reconstitute the whole sequence in order, cursor position discarded.

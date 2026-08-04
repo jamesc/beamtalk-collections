@@ -107,13 +107,17 @@ TestCase subclass: SortedSetTest
     self assert: s min equals: 7
     self assert: s max equals: 7
 
-  testEmptyMinRaises => self should: [SortedSet new min] raise: #user_error
+  testEmptyMinRaises =>
+    self should: [SortedSet new min] raise: #empty_collection
 
-  testEmptyMaxRaises => self should: [SortedSet new max] raise: #user_error
+  testEmptyMaxRaises =>
+    self should: [SortedSet new max] raise: #empty_collection
 
-  testEmptyFirstRaises => self should: [SortedSet new first] raise: #user_error
+  testEmptyFirstRaises =>
+    self should: [SortedSet new first] raise: #empty_collection
 
-  testEmptyLastRaises => self should: [SortedSet new last] raise: #user_error
+  testEmptyLastRaises =>
+    self should: [SortedSet new last] raise: #empty_collection
 
   // === floor: / ceiling: ===
   testFloorExactHit => self assert: (self sample floor: 3) equals: 3

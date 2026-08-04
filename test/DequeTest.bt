@@ -166,19 +166,21 @@ TestCase subclass: DequeTest
 
   // === Empty-end errors ===
   testRemoveFirstOnEmptyRaises =>
-    self should: [Deque new removeFirst] raise: #user_error
+    self should: [Deque new removeFirst] raise: #empty_collection
 
   testRemoveLastOnEmptyRaises =>
-    self should: [Deque new removeLast] raise: #user_error
+    self should: [Deque new removeLast] raise: #empty_collection
 
-  testFirstOnEmptyRaises => self should: [Deque new first] raise: #user_error
+  testFirstOnEmptyRaises =>
+    self should: [Deque new first] raise: #empty_collection
 
-  testLastOnEmptyRaises => self should: [Deque new last] raise: #user_error
+  testLastOnEmptyRaises =>
+    self should: [Deque new last] raise: #empty_collection
 
   testDrainedEmptyStillRaises =>
     empty := (Deque withAll: #(1)) removeFirst
-    self should: [empty first] raise: #user_error
-    self should: [empty removeLast] raise: #user_error
+    self should: [empty first] raise: #empty_collection
+    self should: [empty removeLast] raise: #empty_collection
 
   // === Non-raising ifEmpty: variants ===
   testFirstIfEmptyOnEmpty =>

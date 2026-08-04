@@ -353,7 +353,7 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Ends ===
 
-  /// Smallest key. Raises an error when the map is empty.
+  /// Smallest key. Raises `#empty_collection` when the map is empty.
   ///
   /// `min` and `max` answer *keys*, because keys are the ordered dimension
   /// of a map; `first` and `last` answer the values sitting at those keys.
@@ -363,37 +363,47 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) min   // => 1
   /// ```
   min -> K =>
-    self isEmpty ifTrue: [self error: "SortedMap min: map is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #min
+    ]
     self tree minNode key
 
-  /// Largest key. Raises an error when the map is empty.
+  /// Largest key. Raises `#empty_collection` when the map is empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) max   // => 2
   /// ```
   max -> K =>
-    self isEmpty ifTrue: [self error: "SortedMap max: map is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #max
+    ]
     self tree maxNode key
 
-  /// Value stored under the smallest key. Raises an error when empty.
+  /// Value stored under the smallest key. Raises `#empty_collection` when
+  /// empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) first   // => "a"
   /// ```
   first -> V =>
-    self isEmpty ifTrue: [self error: "SortedMap first: map is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #first
+    ]
     self tree minNode val
 
-  /// Value stored under the largest key. Raises an error when empty.
+  /// Value stored under the largest key. Raises `#empty_collection` when
+  /// empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap withAll: #(#(2, "b"), #(1, "a"))) last   // => "b"
   /// ```
   last -> V =>
-    self isEmpty ifTrue: [self error: "SortedMap last: map is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedMap selector: #last
+    ]
     self tree maxNode val
 
   /// Smallest key, or `emptyBlock`'s value when the map is empty.

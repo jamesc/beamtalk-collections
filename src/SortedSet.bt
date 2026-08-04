@@ -223,24 +223,28 @@ typed Collection(E) subclass: SortedSet(E)
 
   // === Ends ===
 
-  /// Smallest element. Raises an error when the set is empty.
+  /// Smallest element. Raises `#empty_collection` when the set is empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedSet withAll: #(3, 1)) min   // => 1
   /// ```
   min -> E =>
-    self isEmpty ifTrue: [self error: "SortedSet min: set is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedSet selector: #min
+    ]
     self tree minNode key
 
-  /// Largest element. Raises an error when the set is empty.
+  /// Largest element. Raises `#empty_collection` when the set is empty.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedSet withAll: #(3, 1)) max   // => 3
   /// ```
   max -> E =>
-    self isEmpty ifTrue: [self error: "SortedSet max: set is empty"]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #SortedSet selector: #max
+    ]
     self tree maxNode key
 
   /// Smallest element — the first one `do:` visits. Alias of `min`.
