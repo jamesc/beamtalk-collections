@@ -350,8 +350,11 @@ block maps `E -> R`: the caller chose that ordering, and failing loudly on an in
 quietly reverting to natural order.
 
 Range scans are inclusive of both bounds, and neither bound has to be present in the collection.
-`min`, `max`, `first`, `last` and the `ifAbsent:`-less `at:`, `floor:` and `ceiling:` raise a
-structured error rather than answering `nil` when there is no such element.
+`min`, `max`, `first` and `last` raise `#empty_collection` rather than answering `nil` on an empty
+structure. The `ifAbsent:`-less `floor:` and `ceiling:` raise `#not_found` when no key/element
+satisfies the ordering constraint — the same kind `Collection>>detect:` raises on a predicate
+search with no match. `SortedMap`'s `ifAbsent:`-less `at:` raises `#key_error` on a missing key,
+matching core `Dictionary>>at:`.
 
 The balanced tree behind both classes (`SortedTreeNode`) is an implementation detail of this package,
 not public API.

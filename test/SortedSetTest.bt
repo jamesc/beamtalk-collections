@@ -127,10 +127,10 @@ TestCase subclass: SortedSetTest
   testFloorAboveMaxIsTheMax => self assert: (self sample floor: 99) equals: 5
 
   testFloorBelowMinRaises =>
-    self should: [self sample floor: 0] raise: #user_error
+    self should: [self sample floor: 0] raise: #not_found
 
   testFloorOnEmptyRaises =>
-    self should: [SortedSet new floor: 1] raise: #user_error
+    self should: [SortedSet new floor: 1] raise: #not_found
 
   testFloorIfAbsent =>
     self assert: (self sample floor: 0 ifAbsent: [#none]) equals: #none
@@ -143,10 +143,10 @@ TestCase subclass: SortedSetTest
   testCeilingBelowMinIsTheMin => self assert: (self sample ceiling: 0) equals: 1
 
   testCeilingAboveMaxRaises =>
-    self should: [self sample ceiling: 99] raise: #user_error
+    self should: [self sample ceiling: 99] raise: #not_found
 
   testCeilingOnEmptyRaises =>
-    self should: [SortedSet new ceiling: 1] raise: #user_error
+    self should: [SortedSet new ceiling: 1] raise: #not_found
 
   testCeilingIfAbsent =>
     self assert: (self sample ceiling: 99 ifAbsent: [#none]) equals: #none

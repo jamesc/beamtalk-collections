@@ -197,14 +197,23 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Lookup ===
 
-  /// Value stored under `key`. Raises an error when the key is absent.
+  /// Value stored under `key`. Raises `#key_error` when the key is absent —
+  /// matching core `Dictionary>>at:` on a missing key.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (SortedMap new at: 1 put: "a") at: 1   // => "a"
   /// ```
   at: key :: K -> V =>
-    self at: key ifAbsent: [self error: "SortedMap: key not found"]
+    self
+      at: key
+      ifAbsent: [
+        Exception
+          signalKind: #key_error
+          class: #SortedMap
+          selector: #at:
+          hint: "key not found"
+      ]
 
   /// Value stored under `key`, or the result of `absentBlock` when absent.
   ///
@@ -458,8 +467,9 @@ typed Collection(V) subclass: SortedMap(K, V)
 
   // === Nearest neighbours ===
 
-  /// Greatest key that sorts at or before `key`. Raises an error when every
-  /// key sorts after it.
+  /// Greatest key that sorts at or before `key`. Raises `#not_found` when
+  /// every key sorts after it — the same kind `Collection>>detect:` raises
+  /// on a predicate search with no match.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -467,9 +477,15 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) floor: 5   // => 5
   /// ```
   floor: key :: K -> K =>
-    self floor: key ifAbsent: [
-      self error: "SortedMap floor: no key sorts at or before the given key"
-    ]
+    self
+      floor: key
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedMap
+          selector: #floor:
+          hint: "no key sorts at or before the given key"
+      ]
 
   /// Greatest key that sorts at or before `key`, or the result of
   /// `absentBlock` when every key sorts after it.
@@ -485,8 +501,8 @@ typed Collection(V) subclass: SortedMap(K, V)
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
-  /// Least key that sorts at or after `key`. Raises an error when every key
-  /// sorts before it.
+  /// Least key that sorts at or after `key`. Raises `#not_found` when every
+  /// key sorts before it.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -494,9 +510,15 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #(#(1, "a"), #(5, "e"))) ceiling: 1   // => 1
   /// ```
   ceiling: key :: K -> K =>
-    self ceiling: key ifAbsent: [
-      self error: "SortedMap ceiling: no key sorts at or after the given key"
-    ]
+    self
+      ceiling: key
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedMap
+          selector: #ceiling:
+          hint: "no key sorts at or after the given key"
+      ]
 
   /// Least key that sorts at or after `key`, or the result of `absentBlock`
   /// when every key sorts before it.

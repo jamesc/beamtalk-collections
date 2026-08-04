@@ -312,8 +312,9 @@ typed Collection(E) subclass: SortedSet(E)
 
   // === Nearest neighbours ===
 
-  /// Greatest element that sorts at or before `element`. Raises an error when
-  /// every element sorts after it.
+  /// Greatest element that sorts at or before `element`. Raises `#not_found`
+  /// when every element sorts after it — the same kind `Collection>>detect:`
+  /// raises on a predicate search with no match.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -321,9 +322,15 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet withAll: #(1, 5)) floor: 5   // => 5
   /// ```
   floor: element :: E -> E =>
-    self floor: element ifAbsent: [
-      self error: "SortedSet floor: no element sorts at or before the given one"
-    ]
+    self
+      floor: element
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedSet
+          selector: #floor:
+          hint: "no element sorts at or before the given one"
+      ]
 
   /// Greatest element that sorts at or before `element`, or the result of
   /// `absentBlock` when every element sorts after it.
@@ -339,8 +346,8 @@ typed Collection(E) subclass: SortedSet(E)
       best: nil
     found isNil ifTrue: [absentBlock value] ifFalse: [found key]
 
-  /// Least element that sorts at or after `element`. Raises an error when
-  /// every element sorts before it.
+  /// Least element that sorts at or after `element`. Raises `#not_found`
+  /// when every element sorts before it.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -348,9 +355,15 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet withAll: #(1, 5)) ceiling: 1   // => 1
   /// ```
   ceiling: element :: E -> E =>
-    self ceiling: element ifAbsent: [
-      self error: "SortedSet ceiling: no element sorts at or after the given one"
-    ]
+    self
+      ceiling: element
+      ifAbsent: [
+        Exception
+          signalKind: #not_found
+          class: #SortedSet
+          selector: #ceiling:
+          hint: "no element sorts at or after the given one"
+      ]
 
   /// Least element that sorts at or after `element`, or the result of
   /// `absentBlock` when every element sorts before it.
