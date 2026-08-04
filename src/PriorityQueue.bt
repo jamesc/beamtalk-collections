@@ -282,6 +282,7 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// (PriorityQueue withAll: #(5, 1, 3)) peek           // => 1
   /// ```
   peek -> E =>
+    @expect type
     self.root isNil
       ifTrue: [
         (Erlang beamtalk_collection) raiseEmpty: #PriorityQueue selector: #peek
@@ -322,6 +323,7 @@ typed Collection(E) subclass: PriorityQueue(E)
   /// rest peek                                          // => 3
   /// ```
   removeMin -> PriorityQueue(E) =>
+    @expect type
     self.root isNil ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #PriorityQueue selector: #removeMin
     ] ifFalse: [self popRoot]

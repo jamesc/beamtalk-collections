@@ -230,6 +230,7 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet withAll: #(3, 1)) min   // => 1
   /// ```
   min -> E =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #SortedSet selector: #min
     ]
@@ -242,6 +243,7 @@ typed Collection(E) subclass: SortedSet(E)
   /// (SortedSet withAll: #(3, 1)) max   // => 3
   /// ```
   max -> E =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #SortedSet selector: #max
     ]

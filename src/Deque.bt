@@ -117,6 +117,7 @@ typed Collection(E) subclass: Deque(E)
   /// d removeFirst asList   // => #(2, 3)
   /// ```
   removeFirst -> Deque(E) =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #removeFirst
     ]
@@ -150,6 +151,7 @@ typed Collection(E) subclass: Deque(E)
   /// d removeLast asList    // => #(1, 2)
   /// ```
   removeLast -> Deque(E) =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #removeLast
     ]
@@ -179,6 +181,7 @@ typed Collection(E) subclass: Deque(E)
   /// (Deque withAll: #(1, 2, 3)) first   // => 1
   /// ```
   first -> E =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #first
     ]
@@ -208,6 +211,7 @@ typed Collection(E) subclass: Deque(E)
   /// (Deque withAll: #(1, 2, 3)) last   // => 3
   /// ```
   last -> E =>
+    @expect type
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Deque selector: #last
     ]

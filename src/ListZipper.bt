@@ -80,6 +80,7 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   class on: aCollection :: Collection(E) -> ListZipper(E) =>
     elements := aCollection asList
+    @expect type
     elements isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #on:
     ]
@@ -269,6 +270,7 @@ typed Collection(E) subclass: ListZipper(E)
             #count => self.count - 1
           }
       ]
+    @expect type
     (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #remove
 
   // === Collection protocol ===
@@ -317,6 +319,7 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   select: block :: Block(E, Boolean) -> ListZipper(E) =>
     matches := self asList select: block
+    @expect type
     matches isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #select:
     ]
@@ -336,6 +339,7 @@ typed Collection(E) subclass: ListZipper(E)
   /// ```
   reject: block :: Block(E, Boolean) -> ListZipper(E) =>
     survivors := self asList reject: block
+    @expect type
     survivors isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #ListZipper selector: #reject:
     ]
