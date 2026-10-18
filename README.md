@@ -425,7 +425,7 @@ directly, with no hook to redirect them:
 * **BUnit's `assert:equals:`** uses `=:=`, so `self assert: a equals: b` fails on a pair built two
   different ways. Write `self assert: (a equals: b)` instead.
 
-`test/EqualityTest.bt` pins all of this down, including the `Set` and `Dictionary` consequences.
+`test/equality_test.bt` pins all of this down, including the `Set` and `Dictionary` consequences.
 
 ### Why not fix `=:=` itself
 
