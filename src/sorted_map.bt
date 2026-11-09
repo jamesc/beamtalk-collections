@@ -70,7 +70,6 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// ```beamtalk
   /// SortedMap defaultComparator value: 1 value: 2   // => true
   /// ```
-  @expect type
   class defaultComparator -> Block(K, K, Boolean) => [:a :b | a <= b]
 
   /// Create an empty map ordered by `comparator`, a `Block(K, K, Boolean)`

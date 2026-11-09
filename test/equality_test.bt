@@ -162,9 +162,11 @@ TestCase subclass: EqualityTest
 
   // The same tie happens at depth, so a type check on the elements themselves
   // would not have been enough — `{1}` and `{1.0}` are both Tuples.
+  // Tuples have no `<=`, so the queue orders them by their first slot.
   testPriorityQueueNestedMixedNumericTypesAreOneMultiset =>
-    a := PriorityQueue withAll: #((Tuple withAll: #(1)), (Tuple withAll: #(1.0)))
-    b := PriorityQueue withAll: #((Tuple withAll: #(1.0)), (Tuple withAll: #(1)))
+    byFirst := [:a :b | (a at: 1) <= (b at: 1)]
+    a := (PriorityQueue sortedBy: byFirst) addAll: #((Tuple withAll: #(1)), (Tuple withAll: #(1.0)))
+    b := (PriorityQueue sortedBy: byFirst) addAll: #((Tuple withAll: #(1.0)), (Tuple withAll: #(1)))
     self deny: (a asList sort =:= b asList sort)
     self assert: (a equals: b)
     self assert: (b equals: a)
