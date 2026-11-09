@@ -72,7 +72,6 @@ typed Collection(E) subclass: SortedSet(E)
   /// ```beamtalk
   /// SortedSet defaultComparator value: 1 value: 2   // => true
   /// ```
-  @expect type
   class defaultComparator -> Block(E, E, Boolean) => [:a :b | a <= b]
 
   /// Create an empty set ordered by `comparator`, a `Block(E, E, Boolean)`
