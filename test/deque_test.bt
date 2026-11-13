@@ -75,7 +75,7 @@ TestCase subclass: DequeTest
 
   testRemoveFirstIsImmutable =>
     d := Deque withAll: #(1, 2, 3)
-    d removeFirst
+    _ := d removeFirst
     self assert: d asList equals: #(1, 2, 3)
 
   testRemoveFirstDownToEmpty =>
