@@ -145,7 +145,7 @@ TestCase subclass: PriorityQueueTest
   testMergeLeavesOperandsUnchanged =>
     a := PriorityQueue withAll: #(5, 1)
     b := PriorityQueue withAll: #(3)
-    a merge: b
+    _ := a merge: b
     self assert: a size equals: 2
     self assert: b size equals: 1
 

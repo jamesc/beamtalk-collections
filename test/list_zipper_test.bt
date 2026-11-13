@@ -61,7 +61,7 @@ TestCase subclass: ListZipperTest
 
   testNavigationDoesNotMutateReceiver =>
     z := ListZipper on: #(1, 2, 3)
-    z right
+    _ := z right
     self assert: z focus equals: 1
     self assert: z atStart
 
@@ -92,7 +92,7 @@ TestCase subclass: ListZipperTest
 
   testReplaceDoesNotMutateReceiver =>
     z := ListZipper on: #(1, 2, 3)
-    z replace: 9
+    _ := z replace: 9
     self assert: z focus equals: 1
     self assert: z asList equals: #(1, 2, 3)
 
@@ -129,8 +129,8 @@ TestCase subclass: ListZipperTest
 
   testInsertDoesNotMutateReceiver =>
     z := ListZipper on: #(1, 2)
-    z insertBefore: 9
-    z insertAfter: 9
+    _ := z insertBefore: 9
+    _ := z insertAfter: 9
     self assert: z asList equals: #(1, 2)
     self assert: z size equals: 2
 
@@ -163,7 +163,7 @@ TestCase subclass: ListZipperTest
 
   testRemoveDoesNotMutateReceiver =>
     z := ListZipper on: #(1, 2, 3)
-    z remove
+    _ := z remove
     self assert: z asList equals: #(1, 2, 3)
     self assert: z size equals: 3
 
