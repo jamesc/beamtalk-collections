@@ -206,6 +206,28 @@ TestCase subclass: SortedMapTest
     self assert: (self sample select: [:v | v =:= "c"]) keys equals: #(3)
     self assert: (self sample reject: [:v | v =:= "c"]) keys equals: #(1, 5)
 
+  testParallelCollectKeepsComparator =>
+    original := self descendingSample
+    derived := original parallelCollect: [:v | v * 2]
+    self assert: derived keys equals: #(3, 2, 1)
+    self assert: derived values equals: #(60, 40, 20)
+    self assert: (derived merge: original) keys equals: #(3, 2, 1)
+
+  testParallelCollectMaxConcurrencyKeepsComparator =>
+    original := self descendingSample
+    derived := original parallelCollect: [:v | v * 2] maxConcurrency: 2
+    self assert: derived keys equals: #(3, 2, 1)
+    self assert: derived values equals: #(60, 40, 20)
+    self assert: (derived merge: original) keys equals: #(3, 2, 1)
+
+  testParallelCollectOnEmptyMap =>
+    self assert: (SortedMap new parallelCollect: [:v | v]) isEmpty
+
+  testParallelCollectRejectsNonPositiveConcurrency =>
+    self should: [
+      self sample parallelCollect: [:v | v] maxConcurrency: 0
+    ] raise: #type_error
+
   testCollectKeepsKeysAndOrder =>
     m := (SortedMap withAll: #(#(2, 20), #(1, 10))) collect: [:v | v * 2]
     self assert: m keys equals: #(1, 2)
