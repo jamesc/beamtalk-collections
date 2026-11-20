@@ -93,6 +93,13 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// (SortedMap withAll: #{#b => 2, #a => 1}) keys        // => #(#a, #b)
   /// (SortedMap withAll: #(#(1, "a"), #(2, "b"))) size    // => 2
   /// ```
+  ///
+  /// Takes key-value pairs or a keyed collection rather than
+  /// `Collection class>>withAll:`'s `List` of elements, so it is not a
+  /// drop-in species constructor. That is safe because every inherited
+  /// method that rebuilds through `self species withAll:` (`collect:`,
+  /// `select:`, both `parallelCollect:` variants) is overridden below.
+  @expect type
   class withAll: source :: Collection -> SortedMap(K, V) =>
     self fill: SortedMap new from: source
 
@@ -317,6 +324,41 @@ typed Collection(V) subclass: SortedMap(K, V)
     source := self
     self keys inject: (self withRoot: nil) into: [:acc :k |
       acc at: k put: (block value: (source at: k))
+    ]
+
+  /// Like `collect:`, but evaluates `block` for every value concurrently,
+  /// keeping the keys and the ordering.
+  ///
+  /// Overrides `Collection>>parallelCollect:`, which rebuilds through
+  /// `self species withAll:` and would hand `SortedMap withAll:` a `List` of
+  /// bare values instead of key-value pairs. Concurrency and failure
+  /// behaviour are `List>>parallelCollect:`'s.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #{#a => 1}) parallelCollect: [:v | v * 10]) values   // => #(10)
+  /// ```
+  parallelCollect: block :: Block(V, R) -> SortedMap(K, R) =>
+    self withValues: (self values parallelCollect: block)
+
+  /// Like `parallelCollect:`, but bounds concurrency to `maxConcurrency`
+  /// processes at a time, as `Collection>>parallelCollect:maxConcurrency:`.
+  ///
+  /// Raises `#type_error` if `maxConcurrency` is not a positive Integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((SortedMap withAll: #{#a => 1, #b => 2}) parallelCollect: [:v | v * 10] maxConcurrency: 1) values
+  ///   // => #(10, 20)
+  /// ```
+  parallelCollect: block :: Block(V, R) maxConcurrency: maxConcurrency :: Integer -> SortedMap(K, R) =>
+    self withValues: (self values parallelCollect: block maxConcurrency: maxConcurrency)
+
+  /// A map with the receiver's keys and ordering, bound in key order to
+  /// `newValues` (one per key).
+  internal withValues: newValues :: List(R) -> SortedMap(K, R) =>
+    (self keys zip: newValues) inject: (self withRoot: nil) into: [:acc :pair |
+      acc at: (pair at: 1) put: (pair at: 2)
     ]
 
   /// Select the bindings whose *value* satisfies `block`, keeping the keys and
