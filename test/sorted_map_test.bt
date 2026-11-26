@@ -51,6 +51,11 @@ TestCase subclass: SortedMapTest
     self assert: m keys equals: #(1, 3)
     self assert: (m at: 3) equals: "c"
 
+  testWithAllFromTuplePairs =>
+    m := SortedMap withAll: #((Tuple withAll: #(3, "c")), (Tuple withAll: #(1, "a")))
+    self assert: m keys equals: #(1, 3)
+    self assert: (m at: 3) equals: "c"
+
   testWithAllFromSortedMap =>
     m := SortedMap withAll: self sample
     self assert: m keys equals: #(1, 3, 5)
