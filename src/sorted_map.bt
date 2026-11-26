@@ -132,7 +132,8 @@ typed Collection(V) subclass: SortedMap(K, V)
       ]
       ifFalse: [
         source inject: target into: [:acc :pair |
-          acc at: (pair at: 1) put: (pair at: 2)
+          #[k, v] := pair
+          acc at: k put: v
         ]
       ]
 
@@ -358,7 +359,8 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// `newValues` (one per key).
   internal withValues: newValues :: List(R) -> SortedMap(K, R) =>
     (self keys zip: newValues) inject: (self withRoot: nil) into: [:acc :pair |
-      acc at: (pair at: 1) put: (pair at: 2)
+      #[k, v] := pair
+      acc at: k put: v
     ]
 
   /// Select the bindings whose *value* satisfies `block`, keeping the keys and
