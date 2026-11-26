@@ -131,10 +131,12 @@ typed Collection(V) subclass: SortedMap(K, V)
         ]
       ]
       ifFalse: [
-        source inject: target into: [:acc :pair |
-          #[k, v] := pair
-          acc at: k put: v
-        ]
+        source
+          inject: target
+          into: [:acc :pair |
+            #[k, v] := pair
+            acc at: k put: v
+          ]
       ]
 
   /// The comparator block actually in force. A `nil` in the `comparator`
@@ -358,10 +360,12 @@ typed Collection(V) subclass: SortedMap(K, V)
   /// A map with the receiver's keys and ordering, bound in key order to
   /// `newValues` (one per key).
   internal withValues: newValues :: List(R) -> SortedMap(K, R) =>
-    (self keys zip: newValues) inject: (self withRoot: nil) into: [:acc :pair |
-      #[k, v] := pair
-      acc at: k put: v
-    ]
+    (self keys zip: newValues)
+      inject: (self withRoot: nil)
+      into: [:acc :pair |
+        #[k, v] := pair
+        acc at: k put: v
+      ]
 
   /// Select the bindings whose *value* satisfies `block`, keeping the keys and
   /// the receiver's ordering.
